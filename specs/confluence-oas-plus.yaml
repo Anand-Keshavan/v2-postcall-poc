@@ -1,0 +1,431 @@
+openapi: 3.0.3
+info:
+  title: Confluence Cloud REST API (OAS++ Enhanced)
+  version: 2.0.0-oas-plus
+  description: |
+    Confluence Cloud REST API v2 with PostCall OAS++ extensions for agent-ready operations.
+
+    This spec includes:
+    - x-postcall-auth-discovery: Machine-readable auth metadata
+    - x-postcall-provisioning-url: Where to get API tokens
+    - x-postcall-grounding: Resolver chains for space/page names to IDs
+    - x-agent-guidance: Example queries for RAG indexing
+
+  x-postcall-auth-discovery:
+    type: token
+    scheme: basic
+    token_type: api_token
+    documentation_url: https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/
+    required_params:
+      email: User's Atlassian account email
+      api_token: API token generated from Atlassian account
+    cloud_id_discovery: https://api.atlassian.com/oauth/token/accessible-resources
+
+  x-postcall-provisioning-url: https://id.atlassian.com/manage-profile/security/api-tokens
+
+servers:
+  - url: https://api.atlassian.com/ex/confluence/{cloudId}
+    description: Confluence Cloud REST API v2
+    variables:
+      cloudId:
+        default: unknown
+        description: Your Confluence Cloud ID (fetched automatically)
+
+paths:
+  # Get spaces (resolver for grounding)
+  /wiki/rest/api/space:
+    get:
+      operationId: listSpaces
+      summary: Get spaces
+      description: Returns all spaces accessible to the authenticated user
+      x-agent-guidance:
+        - "list all spaces"
+        - "show confluence spaces"
+        - "what spaces are available"
+        - "find all my confluence workspaces"
+        - "show all confluence workspaces"
+        - "list confluence spaces"
+        - "what workspaces do I have"
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+            maximum: 250
+        - name: spaceKey
+          in: query
+          description: Filter by space key
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of spaces
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        key:
+                          type: string
+                        name:
+                          type: string
+                        type:
+                          type: string
+                  size:
+                    type: integer
+
+  # Search content (resolver for grounding)
+  /wiki/rest/api/content/search:
+    get:
+      operationId: searchContent
+      summary: Search content using CQL
+      description: |
+        Returns content that matches a Confluence Query Language (CQL) query.
+
+        CQL examples:
+          - Find by creator:     creator.displayName = "Anand"
+          - Find by creator:     creator.displayName = "Abhijit Kane"
+          - Find by creator:     creator = currentUser()
+          - Find by type:        type = page AND space.key = "ENG"
+          - Find by title:       type = page AND title ~ "Onboarding"
+          - Find recent:         type = page AND lastModified > "2024-01-01"
+          - Find in space:       type = page AND space.title = "Engineering"
+          - Find by label:       type = page AND label = "release-notes"
+          - Combine:             creator.displayName = "Anand" AND type = page
+
+        CQL field reference:
+          creator.displayName   – ONLY valid field for searching by author name.
+                                  NEVER use creator.fullname, creator.name, or
+                                  creator.username — these do not exist in CQL
+                                  and will cause a 400 Bad Request error.
+          creator               – author's account ID or currentUser()
+          space.title           – full space name
+          space.key             – space key abbreviation
+          title                 – page title (use ~ for contains, = for exact)
+          type                  – page | blogpost | comment | attachment
+          lastModified          – date of last update
+          label                 – content label/tag
+      x-agent-guidance:
+        - "find all pages created by {creator_name}"
+        - "search for page named {page_name}"
+        - "list pages in {space_name} space"
+        - "find recently updated pages"
+        - "show all blog posts in {space_name}"
+      parameters:
+        - name: cql
+          in: query
+          required: true
+          description: |
+            CQL (Confluence Query Language) query string.
+            Always construct a valid CQL expression.
+            To search by author name: creator.displayName = "Full Name"
+              — NEVER use creator.fullname, creator.name, or creator.username.
+                Only creator.displayName is valid. Using any other field causes a 400 error.
+            To search in a space: space.title = "Space Name"
+            To filter to pages: type = page
+          schema:
+            type: string
+          example: "creator.displayName = \"Anand\" AND type = page"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        type:
+                          type: string
+                        title:
+                          type: string
+                        space:
+                          type: object
+                          properties:
+                            key:
+                              type: string
+                            name:
+                              type: string
+                  size:
+                    type: integer
+
+  # Get page by ID
+  /wiki/rest/api/content/{id}:
+    get:
+      operationId: getPageById
+      summary: Get content by ID
+      description: Returns a specific piece of content by ID
+      x-agent-guidance:
+        - "get page {page_name}"
+        - "show page {page_name}"
+        - "open {page_name} page"
+        - "show me the {page_name} page in {space_name}"
+
+      # GROUNDING CHAIN: Resolve page title (and optional space name) to page ID
+      x-postcall-grounding:
+        steps:
+          - operationId: searchContent
+            description: "Find page by title"
+            parameters:
+              cql: "type=page AND title~\"{{intent.page_name}}\""
+              limit: 1
+            extract:
+              id: "results[0].id"
+
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: expand
+          in: query
+          description: Expand properties
+          schema:
+            type: string
+          example: "body.storage,version"
+      responses:
+        '200':
+          description: Content details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  type:
+                    type: string
+                  title:
+                    type: string
+                  version:
+                    type: object
+                    properties:
+                      number:
+                        type: integer
+
+  # Create page
+  /wiki/rest/api/content:
+    post:
+      operationId: createPage
+      summary: Create a new page
+      description: Creates a new page in a space
+      x-context-scope: organization
+      x-agent-guidance:
+        - "create a page called {title} in {space_name}"
+        - "add a new page {title} to {space_name} space"
+        - "make a page named {title} in {space_name}"
+
+      # GROUNDING CHAIN: Resolve space name to space key
+      x-postcall-grounding:
+        steps:
+          - operationId: listSpaces
+            description: "Find space by name"
+            parameters:
+              limit: 100
+            filter: "name contains '{{intent.space_name}}'"
+            extract:
+              spaceKey: "results[0].key"
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - type
+                - title
+                - space
+                - body
+              properties:
+                type:
+                  type: string
+                  enum: [page]
+                  default: page
+                title:
+                  type: string
+                  description: Title of the page
+                  example: "Q1 Planning"
+                space:
+                  type: object
+                  required:
+                    - key
+                  properties:
+                    key:
+                      type: string
+                      description: Space key (resolved via grounding)
+                      example: "MKT"
+                body:
+                  type: object
+                  required:
+                    - storage
+                  properties:
+                    storage:
+                      type: object
+                      required:
+                        - value
+                        - representation
+                      properties:
+                        value:
+                          type: string
+                          description: Page content in storage format (HTML)
+                          example: "<p>This is the page content</p>"
+                        representation:
+                          type: string
+                          enum: [storage]
+                          default: storage
+
+      responses:
+        '200':
+          description: Page created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  title:
+                    type: string
+                  _links:
+                    type: object
+                    properties:
+                      webui:
+                        type: string
+
+  # Add comment to page (with multi-step grounding)
+  /wiki/rest/api/content/{id}/child/comment:
+    post:
+      operationId: addPageComment
+      summary: Add comment to a page
+      description: Adds a comment to a page
+      x-context-scope: organization
+      x-agent-guidance:
+        - "add comment to {page_name} in {space_name}"
+        - "comment on {page_name}: {comment_text}"
+        - "leave feedback on {page_name} page"
+        - "add '{comment_text}' comment to {page_name}"
+
+      # GROUNDING CHAIN: Resolve space name + page name to page ID
+      x-postcall-grounding:
+        steps:
+          - operationId: listSpaces
+            description: "Find space by name"
+            parameters:
+              limit: 100
+            filter: "name contains '{{intent.space_name}}'"
+            extract:
+              spaceKey: "results[0].key"
+
+          - operationId: searchContent
+            description: "Find page by title in the space"
+            parameters:
+              cql: "space={{steps[0].spaceKey}} AND type=page AND title~'{{intent.page_name}}'"
+              limit: 10
+            extract:
+              id: "results[0].id"
+
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Page ID (resolved via grounding)
+          schema:
+            type: string
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - type
+                - container
+                - body
+              properties:
+                type:
+                  type: string
+                  enum: [comment]
+                  default: comment
+                container:
+                  type: object
+                  required:
+                    - id
+                    - type
+                  properties:
+                    id:
+                      type: string
+                      description: Parent page ID
+                    type:
+                      type: string
+                      enum: [page]
+                      default: page
+                body:
+                  type: object
+                  required:
+                    - storage
+                  properties:
+                    storage:
+                      type: object
+                      required:
+                        - value
+                        - representation
+                      properties:
+                        value:
+                          type: string
+                          description: Comment content in storage format
+                          example: "<p>Great documentation!</p>"
+                        representation:
+                          type: string
+                          enum: [storage]
+                          default: storage
+
+      responses:
+        '200':
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  type:
+                    type: string
+                  title:
+                    type: string
+
+components:
+  securitySchemes:
+    BasicAuth:
+      type: http
+      scheme: basic
+      description: |
+        Confluence API Token authentication using Basic Auth.
+        Format: base64(email:api_token)
+
+        Get your API token from: https://id.atlassian.com/manage-profile/security/api-tokens
+
+security:
+  - BasicAuth: []

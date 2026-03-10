@@ -1,0 +1,1168 @@
+openapi: 3.0.3
+info:
+  title: GitHub REST API (OAS++ Enhanced)
+  version: 2.0.0-oas-plus
+  description: |
+    GitHub REST API with PostCall OAS++ extensions for agent-ready operations.
+
+    This spec includes:
+    - x-postcall-auth-discovery: Machine-readable auth metadata
+    - x-postcall-provisioning-url: Where to get API tokens
+    - x-postcall-grounding: Resolver chains for natural language to IDs
+    - x-agent-guidance: Example queries for RAG indexing
+
+    Grounding patterns:
+      Pattern A (org name → org login):
+        Step 1: searchRepos(q: "org:{org_name}") → items[0].owner.login
+      Pattern B (repo name → owner + repo):
+        Step 1: getAuthenticatedUser() → login
+        Step 2: searchRepos(q: "{repo_name} in:name user:{login}") → owner, repo
+
+  x-postcall-auth-discovery:
+    type: token
+    scheme: bearer
+    token_type: personal_access_token
+    documentation_url: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
+    scopes:
+      repo: Full control of private repositories
+      read:user: Read user profile data
+      user:email: Access user email addresses
+      read:org: Read organization membership and details
+
+  x-postcall-provisioning-url: https://github.com/settings/tokens/new?description=PostCall&scopes=repo,read:user,user:email,read:org
+  x-postcall-auth-notes: |
+    IMPORTANT: You must create a CLASSIC Personal Access Token (not Fine-Grained).
+    Fine-Grained PATs return empty results for /user/repos unless repos are explicitly
+    selected during token creation. Classic PATs with 'repo' scope return all accessible
+    repositories automatically.
+    Steps: github.com → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic)
+
+servers:
+  - url: https://api.github.com
+    description: GitHub REST API v3
+
+paths:
+
+  # ── User ──────────────────────────────────────────────────────────────────────
+
+  /user:
+    get:
+      operationId: getAuthenticatedUser
+      summary: Get authenticated user
+      description: Get profile information about the currently authenticated user including login, name, email, and public repo count.
+      x-agent-guidance:
+        - "who am I on github"
+        - "show my github profile"
+        - "get my user info"
+        - "what is my github username"
+        - "show my account details"
+      responses:
+        '200':
+          description: Authenticated user profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  login:
+                    type: string
+                    description: GitHub username
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  email:
+                    type: string
+                  bio:
+                    type: string
+                  public_repos:
+                    type: integer
+                  followers:
+                    type: integer
+                  following:
+                    type: integer
+                  html_url:
+                    type: string
+                  created_at:
+                    type: string
+
+  /users/{username}:
+    get:
+      operationId: getUser
+      summary: Get a specific GitHub user
+      description: Get public profile information for any GitHub user by their username.
+      x-agent-guidance:
+        - "get info about github user {username}"
+        - "show profile for {username}"
+        - "look up github user {username}"
+        - "who is {username} on github"
+      parameters:
+        - name: username
+          in: path
+          required: true
+          description: GitHub username to look up
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  login:
+                    type: string
+                  name:
+                    type: string
+                  bio:
+                    type: string
+                  public_repos:
+                    type: integer
+                  followers:
+                    type: integer
+                  html_url:
+                    type: string
+
+  # ── Organizations ─────────────────────────────────────────────────────────────
+
+  /user/orgs:
+    get:
+      operationId: listUserOrgs
+      summary: List organizations for the authenticated user
+      description: List all organizations the authenticated user belongs to, including both public and private memberships.
+      x-agent-guidance:
+        - "list my organizations"
+        - "show my github orgs"
+        - "what organizations am I part of"
+        - "which github organizations do I belong to"
+        - "show all my github organizations"
+        - "list orgs I am a member of"
+      parameters:
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: List of organizations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    login:
+                      type: string
+                      description: Organization login name
+                    id:
+                      type: integer
+                    description:
+                      type: string
+                    url:
+                      type: string
+                    repos_url:
+                      type: string
+                    avatar_url:
+                      type: string
+
+  /orgs/{org}:
+    get:
+      operationId: getOrg
+      summary: Get organization details
+      description: Get detailed information about a GitHub organization including member count, public repos, location, and description.
+
+      x-agent-guidance:
+        - "get info about {org_name} organization"
+        - "show details of {org_name} org"
+        - "describe the {org_name} github organization"
+        - "what is the {org_name} organization"
+
+      # GROUNDING CHAIN (Pattern A): org name → org login
+      x-postcall-grounding:
+        steps:
+          - operationId: searchRepos
+            description: "Find the exact org login by searching for repos in the named org"
+            parameters:
+              q: "org:{{intent.org_name}}"
+            extract:
+              org: "items[0].owner.login"
+
+      parameters:
+        - name: org
+          in: path
+          required: true
+          description: Organization login name (resolved via grounding from org_name)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Organization details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  login:
+                    type: string
+                  name:
+                    type: string
+                  description:
+                    type: string
+                  public_repos:
+                    type: integer
+                  members_url:
+                    type: string
+                  html_url:
+                    type: string
+                  location:
+                    type: string
+                  email:
+                    type: string
+                  created_at:
+                    type: string
+
+  /orgs/{org}/members:
+    get:
+      operationId: listOrgMembers
+      summary: List members of an organization
+      description: List all public members of a GitHub organization.
+
+      x-agent-guidance:
+        - "list members of {org_name} organization"
+        - "who is in the {org_name} org"
+        - "show members of {org_name}"
+        - "who belongs to {org_name} github organization"
+        - "list people in {org_name}"
+
+      # GROUNDING CHAIN (Pattern A): org name → org login
+      x-postcall-grounding:
+        steps:
+          - operationId: searchRepos
+            description: "Find the exact org login by searching for repos in the named org"
+            parameters:
+              q: "org:{{intent.org_name}}"
+            extract:
+              org: "items[0].owner.login"
+
+      parameters:
+        - name: org
+          in: path
+          required: true
+          description: Organization login name (resolved via grounding)
+          schema:
+            type: string
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: List of organization members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    login:
+                      type: string
+                    id:
+                      type: integer
+                    avatar_url:
+                      type: string
+                    html_url:
+                      type: string
+                    type:
+                      type: string
+
+  # ── Repositories ──────────────────────────────────────────────────────────────
+
+  /user/repos:
+    get:
+      operationId: listUserRepos
+      summary: List repositories for the authenticated user
+      description: List all repositories the authenticated user has access to, including private repos.
+      x-agent-guidance:
+        - "list my repositories"
+        - "show my github repos"
+        - "what repos do I have"
+        - "show all my repositories"
+        - "list my github projects"
+      parameters:
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [created, updated, pushed, full_name]
+            default: updated
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: List of repositories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                    full_name:
+                      type: string
+                    private:
+                      type: boolean
+                    description:
+                      type: string
+                    html_url:
+                      type: string
+                    language:
+                      type: string
+                    stargazers_count:
+                      type: integer
+                    open_issues_count:
+                      type: integer
+                    updated_at:
+                      type: string
+                    owner:
+                      type: object
+                      properties:
+                        login:
+                          type: string
+
+  /orgs/{org}/repos:
+    get:
+      operationId: listOrgRepos
+      summary: List repositories in an organization
+      description: List all repositories belonging to a GitHub organization.
+
+      x-agent-guidance:
+        - "list repos in {org_name} organization"
+        - "show all repositories for {org_name}"
+        - "what repos does {org_name} have"
+        - "find repositories in {org_name} org"
+        - "show {org_name} organization repositories"
+        - "list projects in {org_name}"
+
+      # GROUNDING CHAIN (Pattern A): org name → org login
+      x-postcall-grounding:
+        steps:
+          - operationId: searchRepos
+            description: "Find the exact org login by searching for repos in the named org"
+            parameters:
+              q: "org:{{intent.org_name}}"
+            extract:
+              org: "items[0].owner.login"
+
+      parameters:
+        - name: org
+          in: path
+          required: true
+          description: Organization login name (resolved via grounding from org_name)
+          schema:
+            type: string
+        - name: type
+          in: query
+          description: Filter by repo type
+          schema:
+            type: string
+            enum: [all, public, private, forks, sources, member]
+            default: all
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [created, updated, pushed, full_name]
+            default: updated
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: List of organization repositories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                    full_name:
+                      type: string
+                    private:
+                      type: boolean
+                    description:
+                      type: string
+                    html_url:
+                      type: string
+                    language:
+                      type: string
+                    stargazers_count:
+                      type: integer
+                    open_issues_count:
+                      type: integer
+                    updated_at:
+                      type: string
+
+  /repos/{owner}/{repo}:
+    get:
+      operationId: getRepo
+      summary: Get a repository
+      description: Get detailed information about a specific repository by owner and repo name.
+
+      x-agent-guidance:
+        - "get info about {repo_name} repository"
+        - "show details of {repo_name} repo"
+        - "describe the {repo_name} repository"
+        - "what is the {repo_name} github project"
+
+      # GROUNDING CHAIN (Pattern B): repo name → owner + repo
+      x-postcall-grounding:
+        steps:
+          - operationId: getAuthenticatedUser
+            description: "Get the authenticated user's login"
+            extract:
+              owner: "login"
+
+          - operationId: searchRepos
+            description: "Search for the repository by name"
+            parameters:
+              q: "{{intent.repo_name}} in:name user:{{steps[0].owner}}"
+            extract:
+              owner: "items[0].owner.login"
+              repo: "items[0].name"
+
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          description: Repository owner login (resolved via grounding)
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          description: Repository name (resolved via grounding)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Repository details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  full_name:
+                    type: string
+                  description:
+                    type: string
+                  private:
+                    type: boolean
+                  html_url:
+                    type: string
+                  language:
+                    type: string
+                  stargazers_count:
+                    type: integer
+                  forks_count:
+                    type: integer
+                  open_issues_count:
+                    type: integer
+                  default_branch:
+                    type: string
+                  created_at:
+                    type: string
+                  updated_at:
+                    type: string
+
+  /search/repositories:
+    get:
+      operationId: searchRepos
+      summary: Search GitHub repositories
+      description: Search repositories across GitHub using a query string. Supports qualifiers like user:, org:, language:, in:name, stars:>N.
+      x-agent-guidance:
+        - "search for {repo_name} repository"
+        - "find repos named {repo_name}"
+        - "look up {repo_name} repo on github"
+        - "search github for {repo_name}"
+        - "find repositories matching {query}"
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: |
+            Search query. Supports qualifiers:
+            - user:{login} — repos owned by a user
+            - org:{org} — repos in an org
+            - in:name — search in repo name
+            - language:{lang} — filter by language
+            - stars:>N — filter by star count
+          schema:
+            type: string
+          example: "postcall org:postmanlabs"
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [stars, forks, updated]
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        name:
+                          type: string
+                        full_name:
+                          type: string
+                        description:
+                          type: string
+                        html_url:
+                          type: string
+                        stargazers_count:
+                          type: integer
+                        language:
+                          type: string
+                        owner:
+                          type: object
+                          properties:
+                            login:
+                              type: string
+
+  # ── Issues ────────────────────────────────────────────────────────────────────
+
+  /issues:
+    get:
+      operationId: listMyIssues
+      summary: List issues for the authenticated user
+      description: List all issues assigned to, created by, or mentioning the authenticated user across all repositories they have access to.
+      x-agent-guidance:
+        - "list my issues"
+        - "show issues assigned to me"
+        - "what issues do I have"
+        - "show all my open issues"
+        - "list issues created by me"
+        - "show my github issues"
+      parameters:
+        - name: filter
+          in: query
+          description: Which issues to return (assigned, created, mentioned, subscribed, all)
+          schema:
+            type: string
+            enum: [assigned, created, mentioned, subscribed, repos, all]
+            default: assigned
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [open, closed, all]
+            default: open
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [created, updated, comments]
+            default: created
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: List of issues
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    number:
+                      type: integer
+                    title:
+                      type: string
+                    state:
+                      type: string
+                    html_url:
+                      type: string
+                    repository_url:
+                      type: string
+                    user:
+                      type: object
+                      properties:
+                        login:
+                          type: string
+                    created_at:
+                      type: string
+                    updated_at:
+                      type: string
+                    body:
+                      type: string
+
+  /orgs/{org}/issues:
+    get:
+      operationId: listOrgIssues
+      summary: List issues for an organization
+      description: List all open issues across all repositories in a GitHub organization.
+
+      x-agent-guidance:
+        - "list issues in {org_name} organization"
+        - "show open issues for {org_name} org"
+        - "find bugs in {org_name} organization"
+        - "what issues exist in {org_name}"
+        - "show all issues across {org_name} repos"
+        - "list {org_name} organization issues"
+
+      # GROUNDING CHAIN (Pattern A): org name → org login
+      x-postcall-grounding:
+        steps:
+          - operationId: searchRepos
+            description: "Find the exact org login by searching for repos in the named org"
+            parameters:
+              q: "org:{{intent.org_name}}"
+            extract:
+              org: "items[0].owner.login"
+
+      parameters:
+        - name: org
+          in: path
+          required: true
+          description: Organization login name (resolved via grounding from org_name)
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [open, closed, all]
+            default: open
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [created, updated, comments]
+            default: created
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: List of issues in the organization
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    number:
+                      type: integer
+                    title:
+                      type: string
+                    state:
+                      type: string
+                    html_url:
+                      type: string
+                    repository_url:
+                      type: string
+                    user:
+                      type: object
+                      properties:
+                        login:
+                          type: string
+                    created_at:
+                      type: string
+
+  /repos/{owner}/{repo}/issues:
+    get:
+      operationId: listIssues
+      summary: List repository issues
+      description: List issues in a specific repository. Supports filtering by state, assignee, and labels.
+      x-context-scope: user
+      x-agent-guidance:
+        - "list issues in {repo_name}"
+        - "show bugs in {repo_name}"
+        - "show me issues in my {repo_name} repo"
+        - "what issues are open in {repo_name}"
+        - "find open issues in {repo_name} repository"
+        - "list all issues for {repo_name}"
+
+      # GROUNDING CHAIN (Pattern B): repo name → owner + repo
+      x-postcall-grounding:
+        steps:
+          - operationId: getAuthenticatedUser
+            description: "Get the authenticated user's login"
+            extract:
+              owner: "login"
+
+          - operationId: searchRepos
+            description: "Search for the repository by name"
+            parameters:
+              q: "{{intent.repo_name}} in:name user:{{steps[0].owner}}"
+            extract:
+              owner: "items[0].owner.login"
+              repo: "items[0].name"
+
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          description: Repository owner (resolved via grounding)
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          description: Repository name (resolved via grounding)
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [open, closed, all]
+            default: open
+        - name: assignee
+          in: query
+          description: Filter by assignee username
+          schema:
+            type: string
+        - name: labels
+          in: query
+          description: Comma-separated list of label names to filter by
+          schema:
+            type: string
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+      responses:
+        '200':
+          description: List of issues
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    number:
+                      type: integer
+                    title:
+                      type: string
+                    state:
+                      type: string
+                    html_url:
+                      type: string
+                    user:
+                      type: object
+                      properties:
+                        login:
+                          type: string
+                    labels:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                    created_at:
+                      type: string
+
+  /repos/{owner}/{repo}/issues/{issue_number}:
+    get:
+      operationId: getIssue
+      summary: Get a specific issue
+      description: Get full details of a single issue in a repository including body, comments count, labels, and assignees.
+
+      x-agent-guidance:
+        - "get issue #{issue_number} in {repo_name}"
+        - "show issue {issue_number} from {repo_name}"
+        - "details of issue {issue_number} in {repo_name}"
+        - "what is issue {issue_number} about in {repo_name}"
+
+      # GROUNDING CHAIN (Pattern B): repo name → owner + repo
+      x-postcall-grounding:
+        steps:
+          - operationId: getAuthenticatedUser
+            description: "Get the authenticated user's login"
+            extract:
+              owner: "login"
+
+          - operationId: searchRepos
+            description: "Search for the repository by name"
+            parameters:
+              q: "{{intent.repo_name}} in:name user:{{steps[0].owner}}"
+            extract:
+              owner: "items[0].owner.login"
+              repo: "items[0].name"
+
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          description: Repository owner (resolved via grounding)
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          description: Repository name (resolved via grounding)
+          schema:
+            type: string
+        - name: issue_number
+          in: path
+          required: true
+          description: Issue number
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Issue details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  number:
+                    type: integer
+                  title:
+                    type: string
+                  state:
+                    type: string
+                  body:
+                    type: string
+                  html_url:
+                    type: string
+                  user:
+                    type: object
+                    properties:
+                      login:
+                        type: string
+                  assignees:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        login:
+                          type: string
+                  labels:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                  comments:
+                    type: integer
+                  created_at:
+                    type: string
+                  updated_at:
+                    type: string
+
+  /search/issues:
+    get:
+      operationId: searchIssues
+      summary: Search GitHub issues and pull requests
+      description: |
+        Search issues and pull requests across GitHub using a query string.
+        Supports qualifiers: org:, repo:, author:, assignee:, state:, type:issue, type:pr, label:, in:title.
+      x-agent-guidance:
+        - "search for issues mentioning {topic}"
+        - "find open issues in {org_name} org"
+        - "search github issues about {keyword}"
+        - "find bugs labeled {label} in {org_name}"
+        - "search for pull requests in {org_name}"
+        - "find issues created by {username}"
+        - "search closed issues in {repo_name}"
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: |
+            Search query. Supports qualifiers:
+            - org:{org} — issues in an org
+            - repo:{owner}/{repo} — issues in a specific repo
+            - author:{login} — issues by a user
+            - assignee:{login} — issues assigned to a user
+            - state:open or state:closed
+            - type:issue or type:pr
+            - label:{name} — filter by label
+            - in:title — search in title only
+          schema:
+            type: string
+          example: "org:postmanlabs type:issue state:open"
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [comments, reactions, updated, created]
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+      responses:
+        '200':
+          description: Issue search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        number:
+                          type: integer
+                        title:
+                          type: string
+                        state:
+                          type: string
+                        html_url:
+                          type: string
+                        repository_url:
+                          type: string
+                        user:
+                          type: object
+                          properties:
+                            login:
+                              type: string
+                        labels:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                        created_at:
+                          type: string
+
+  # ── Pull Requests ─────────────────────────────────────────────────────────────
+
+  /repos/{owner}/{repo}/pulls:
+    get:
+      operationId: listPullRequests
+      summary: List pull requests in a repository
+      description: List pull requests in a specific repository, filterable by state (open, closed, all) and branch.
+
+      x-agent-guidance:
+        - "list pull requests in {repo_name}"
+        - "show open PRs for {repo_name}"
+        - "what pull requests are open in {repo_name}"
+        - "list PRs in {repo_name} repository"
+        - "show merged pull requests in {repo_name}"
+        - "find pull requests in {repo_name}"
+
+      # GROUNDING CHAIN (Pattern B): repo name → owner + repo
+      x-postcall-grounding:
+        steps:
+          - operationId: getAuthenticatedUser
+            description: "Get the authenticated user's login"
+            extract:
+              owner: "login"
+
+          - operationId: searchRepos
+            description: "Search for the repository by name"
+            parameters:
+              q: "{{intent.repo_name}} in:name user:{{steps[0].owner}}"
+            extract:
+              owner: "items[0].owner.login"
+              repo: "items[0].name"
+
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          description: Repository owner (resolved via grounding)
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          description: Repository name (resolved via grounding)
+          schema:
+            type: string
+        - name: state
+          in: query
+          description: Filter pull requests by state
+          schema:
+            type: string
+            enum: [open, closed, all]
+            default: open
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [created, updated, popularity, long-running]
+            default: created
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: List of pull requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    number:
+                      type: integer
+                    title:
+                      type: string
+                    state:
+                      type: string
+                    draft:
+                      type: boolean
+                    html_url:
+                      type: string
+                    user:
+                      type: object
+                      properties:
+                        login:
+                          type: string
+                    head:
+                      type: object
+                      properties:
+                        ref:
+                          type: string
+                          description: Source branch name
+                    base:
+                      type: object
+                      properties:
+                        ref:
+                          type: string
+                          description: Target branch name
+                    created_at:
+                      type: string
+                    updated_at:
+                      type: string
+                    merged_at:
+                      type: string
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        GitHub Personal Access Token.
+        Required scopes: repo, read:user, user:email, read:org
+        Get your token from: https://github.com/settings/tokens
+
+security:
+  - BearerAuth: []

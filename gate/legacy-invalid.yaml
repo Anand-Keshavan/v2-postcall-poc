@@ -1,0 +1,32 @@
+# Intentionally incomplete spec — should FAIL the OAS++ Validation Gate
+# Use this to demo "rejected at publishing" behavior
+openapi: 3.1.0
+info:
+  title: Legacy API (not agent-ready)
+  version: 1.0.0
+
+# Missing: x-postcall-auth-discovery and x-postcall-provisioning-url
+servers:
+  - url: https://api.example.com
+
+paths:
+  /organizations/{orgId}/projects/{projectId}/settings:
+    patch:
+      # Missing operationId
+      summary: Update project settings
+      # Missing x-agent-guidance
+      # Missing x-postcall-grounding for projectId/orgId
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema: { type: string }
+          # Missing example
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+          # Missing example and grounding
+      responses:
+        "200":
+          description: OK

@@ -1,0 +1,408 @@
+openapi: 3.0.0
+info:
+  title: Nile Ecommerce API
+  version: 1.0.0
+  description: Mock ecommerce API for testing grounding chains
+  x-postcall-provisioning-url: http://localhost:8000/oauth/authorize
+  x-postcall-auth-discovery:
+    type: oauth2
+    flow: authorization_code
+    authorization_url: http://localhost:8000/oauth/authorize
+    token_url: http://localhost:8000/oauth/token
+    callback_port: 9999
+    client_id: postcall-agent
+    client_secret: postcall-secret
+    scopes:
+      read: Read access to all Nile resources
+
+servers:
+  - url: http://localhost:8000
+    description: Local mock server
+
+paths:
+  # ==================== USER ENDPOINTS ====================
+
+  /users/search:
+    get:
+      operationId: searchUsers
+      summary: Search users by name
+      description: Find users by searching their name
+      x-agent-guidance:
+        - "search for user {user_name}"
+        - "find user named {user_name}"
+        - "look up {user_name}"
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: User name to search for
+          schema:
+            type: string
+          example: "Alice"
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                  total:
+                    type: integer
+
+  /users/{user_id}:
+    get:
+      operationId: getUserById
+      summary: Get user by ID
+      description: Retrieve user details by ID
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  # ==================== CATEGORY ENDPOINTS ====================
+
+  /categories/search:
+    get:
+      operationId: searchCategories
+      summary: Search categories by name
+      description: Find categories by searching their name
+      x-agent-guidance:
+        - "search for category {category_name}"
+        - "find category named {category_name}"
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: Category name to search for
+          schema:
+            type: string
+          example: "Electronics"
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Category'
+                  total:
+                    type: integer
+
+  /categories/{category_id}:
+    get:
+      operationId: getCategoryById
+      summary: Get category by ID
+      description: Retrieve category details by ID
+      parameters:
+        - name: category_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Category details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+
+  # ==================== PRODUCT ENDPOINTS ====================
+
+  /products/search:
+    get:
+      operationId: searchProducts
+      summary: Search products by name
+      description: Find products by searching their name
+      x-agent-guidance:
+        - "search for product {product_name}"
+        - "find product named {product_name}"
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: Product name to search for
+          schema:
+            type: string
+          example: "iPhone"
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  products:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Product'
+                  total:
+                    type: integer
+
+  /products/{product_id}:
+    get:
+      operationId: getProductById
+      summary: Get product by ID
+      description: Retrieve product details by ID
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Product details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+
+  /products:
+    get:
+      operationId: listProductsByCategory
+      summary: List products in a category
+      description: Get all products in a specific category
+      x-agent-guidance:
+        - "show products in {category_name}"
+        - "list products in {category_name} category"
+        - "what products are in {category_name}"
+      x-postcall-grounding:
+        steps:
+          - operationId: searchCategories
+            description: Resolve category name to category ID
+            parameters:
+              name: "{{intent.category_name}}"
+            extract:
+              category_id: "categories[0].id"
+      parameters:
+        - name: category_id
+          in: query
+          required: true
+          description: Category ID (resolved via grounding)
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  products:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Product'
+                  total:
+                    type: integer
+
+  # ==================== ORDER ENDPOINTS ====================
+
+  /orders:
+    get:
+      operationId: listUserOrders
+      summary: List orders for a user
+      description: Get all orders for a specific user
+      x-agent-guidance:
+        - "show orders for {user_name}"
+        - "list orders for {user_name}"
+        - "what orders does {user_name} have"
+        - "{user_name}'s orders"
+      x-postcall-grounding:
+        steps:
+          - operationId: searchUsers
+            description: Resolve user name to user ID
+            parameters:
+              name: "{{intent.user_name}}"
+            extract:
+              user_id: "users[0].id"
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          description: User ID (resolved via grounding)
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+                  total:
+                    type: integer
+
+  /orders/{order_id}:
+    get:
+      operationId: getOrderById
+      summary: Get order by ID
+      description: Retrieve order details by ID
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+
+  # ==================== REVIEW ENDPOINTS ====================
+
+  /reviews:
+    get:
+      operationId: listProductReviews
+      summary: List reviews for a product
+      description: Get all reviews for a specific product
+      x-agent-guidance:
+        - "show reviews for {product_name}"
+        - "list reviews for {product_name}"
+        - "what do people say about {product_name}"
+        - "{product_name} reviews"
+      x-postcall-grounding:
+        steps:
+          - operationId: searchProducts
+            description: Resolve product name to product ID
+            parameters:
+              name: "{{intent.product_name}}"
+            extract:
+              product_id: "products[0].id"
+      parameters:
+        - name: product_id
+          in: query
+          required: true
+          description: Product ID (resolved via grounding)
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reviews:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Review'
+                  total:
+                    type: integer
+
+  /reviews/{review_id}:
+    get:
+      operationId: getReviewById
+      summary: Get review by ID
+      description: Retrieve review details by ID
+      parameters:
+        - name: review_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Review details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+
+    Category:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        category_id:
+          type: integer
+        price:
+          type: number
+        stock:
+          type: integer
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        product_id:
+          type: integer
+        quantity:
+          type: integer
+        status:
+          type: string
+          enum: [processing, shipped, delivered]
+        total:
+          type: number
+
+    Review:
+      type: object
+      properties:
+        id:
+          type: integer
+        product_id:
+          type: integer
+        user_id:
+          type: integer
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string

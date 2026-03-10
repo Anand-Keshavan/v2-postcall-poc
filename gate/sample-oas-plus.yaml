@@ -1,0 +1,112 @@
+# Sample OAS++ spec: agent-ready OpenAPI with PostCall extensions
+# Use case: "Update settings for Marketing project in Acme Corp"
+openapi: 3.1.0
+info:
+  title: Projects API (OAS++)
+  version: 1.0.0
+  description: Demo spec with grounding and auth discovery
+
+# OAS++ Auth discovery (RFC 8414 style)
+x-postcall-auth-discovery:
+  metadata_url: "https://auth.example.com/.well-known/oauth-authorization-server"
+  registration_url: "https://auth.example.com/register"
+x-postcall-provisioning-url: "https://developer.example.com/api-keys"
+
+servers:
+  - url: https://api.example.com
+    description: Demo API
+
+paths:
+  # --- Resolver 1: resolve org by name ---
+  /organizations/search:
+    get:
+      operationId: find_org_by_name
+      summary: Resolve organization by human-readable name
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema: { type: string }
+          example: "Acme Corp"
+      responses:
+        "200":
+          description: Organization found
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name]
+                properties:
+                  id: { type: string, example: "org_8821" }
+                  name: { type: string }
+
+  # --- Resolver 2: resolve project by name within org ---
+  /organizations/{orgId}/projects/lookup:
+    get:
+      operationId: find_project_in_org
+      summary: Resolve project by name within an organization
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema: { type: string, example: "org_8821" }
+        - name: projectName
+          in: query
+          required: true
+          schema: { type: string }
+          example: "Marketing"
+      responses:
+        "200":
+          description: Project found
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id: { type: string, example: "proj_abc_123" }
+                  status: { type: string }
+
+  # --- Primary operation: update project settings (uses grounding) ---
+  /organizations/{orgId}/projects/{projectId}/settings:
+    patch:
+      operationId: update_project_settings
+      summary: Update project settings
+      x-context-scope: organization
+      x-agent-guidance:
+        - "Update the settings for the Marketing project in Acme Corp"
+        - "Change notification preferences for Marketing in Acme Corp"
+        - "Update project settings for Marketing, Acme Corp"
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema: { type: string, example: "org_8821" }
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, example: "proj_abc_123" }
+          x-postcall-grounding:
+            steps:
+              - operationId: find_org_by_name
+                description: Resolves org name to org_id
+                parameters:
+                  name: "{{intent.org_name}}"
+              - operationId: find_project_in_org
+                description: Resolves project name to project_id within org
+                parameters:
+                  orgId: "{{steps[0].id}}"
+                  projectName: "{{intent.project_name}}"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [notifications_enabled]
+              properties:
+                notifications_enabled: { type: boolean }
+                timezone: { type: string }
+      responses:
+        "200":
+          description: Settings updated

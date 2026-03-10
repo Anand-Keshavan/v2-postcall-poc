@@ -1,0 +1,475 @@
+graphqlSchemaPlus: "1.0.0"
+
+info:
+  title: Forge Project Management GraphQL API (Schema++)
+  version: "1.0.0"
+  description: |
+    Forge is a project management platform exposing a GraphQL API.
+    This Schema++ document annotates the GraphQL schema with PostCall
+    extensions for agent-ready natural language access.
+
+    Extensions included:
+    - x-postcall-auth-discovery: Machine-readable API-key auth metadata
+    - x-postcall-provisioning-url: Where to obtain the API key
+    - x-postcall-grounding: Resolver chains (team name → teamId, etc.)
+    - x-agent-guidance: Natural language query seeds for RAG indexing
+
+  x-postcall-auth-discovery:
+    type: api_key
+    location: header
+    header_name: X-API-Key
+    api_key: forge-api-key-postcall-2024
+    documentation_url: http://localhost:9000/docs
+
+  x-postcall-provisioning-url: http://localhost:9000/docs
+
+server:
+  url: http://localhost:9000/graphql
+  protocol: graphql
+
+# ── Full GraphQL SDL (embedded) ───────────────────────────────────────────────
+schema: |
+  enum TaskStatus    { TODO IN_PROGRESS DONE BLOCKED }
+  enum Priority      { LOW MEDIUM HIGH CRITICAL }
+  enum ProjectStatus { PLANNING ACTIVE ON_HOLD COMPLETED }
+
+  type Team {
+    id: ID!
+    name: String!
+    description: String
+    memberCount: Int
+    members: [Member!]!
+    projects: [Project!]!
+  }
+  type Member {
+    id: ID!
+    name: String!
+    email: String!
+    role: String!
+    team: Team!
+  }
+  type Project {
+    id: ID!
+    name: String!
+    description: String
+    status: ProjectStatus!
+    team: Team!
+    tasks: [Task!]!
+  }
+  type Task {
+    id: ID!
+    title: String!
+    status: TaskStatus!
+    priority: Priority!
+    assignee: Member
+    project: Project!
+    team: Team!
+  }
+  type Query {
+    teams: [Team!]!
+    team(id: ID!): Team
+    teamByName(name: String!): Team
+    members: [Member!]!
+    member(id: ID!): Member
+    memberByName(name: String!): Member
+    projects: [Project!]!
+    project(id: ID!): Project
+    projectByName(name: String!): Project
+    tasks: [Task!]!
+    task(id: ID!): Task
+    tasksByTeam(teamId: ID!): [Task!]!
+    tasksByProject(projectId: ID!): [Task!]!
+    tasksByMember(memberId: ID!): [Task!]!
+    projectsByTeam(teamId: ID!): [Project!]!
+    membersByTeam(teamId: ID!): [Member!]!
+  }
+
+# ── Named operations with PostCall extensions ─────────────────────────────────
+operations:
+
+  # ── Resolver operations (used as grounding steps) ─────────────────────────
+
+  listTeams:
+    type: query
+    summary: List all teams
+    description: Returns all teams in the Forge workspace. Used as a grounding resolver to map team names to team IDs.
+    x-agent-guidance:
+      - "list all teams"
+      - "show me the teams"
+      - "what teams exist in Forge"
+      - "get all teams"
+      - "which teams are there"
+    graphql: |
+      query ListTeams {
+        teams {
+          id
+          name
+          description
+          memberCount
+        }
+      }
+    variables: {}
+    response:
+      dataPath: teams
+      schema:
+        type: array
+        items:
+          id: ID
+          name: String
+          description: String
+          memberCount: Int
+
+  findTeamByName:
+    type: query
+    summary: Find a team by name
+    description: |
+      Search for a team by a partial or full name match.
+      This operation is used as a grounding resolver — the returned `id`
+      is injected into subsequent queries that require a teamId.
+    x-agent-guidance:
+      - "find {team_name} team"
+      - "get team called {team_name}"
+      - "look up the {team_name} team"
+      - "search for team named {team_name}"
+    graphql: |
+      query FindTeamByName($name: String!) {
+        teamByName(name: $name) {
+          id
+          name
+          description
+          members { id name email role }
+        }
+      }
+    variables:
+      name:
+        type: String!
+        source: intent
+        intentParam: team_name
+        description: Team name to search for
+    response:
+      dataPath: teamByName
+      schema:
+        id: ID
+        name: String
+        description: String
+        members:
+          type: array
+          items: { id: ID, name: String, email: String, role: String }
+
+  findMemberByName:
+    type: query
+    summary: Find a team member by name
+    description: |
+      Search for a member by partial or full name match.
+      Used as a grounding resolver — returns the `id` used in tasksByMember queries.
+    x-agent-guidance:
+      - "find member {member_name}"
+      - "look up {member_name}"
+      - "who is {member_name}"
+      - "get details for {member_name}"
+    graphql: |
+      query FindMemberByName($name: String!) {
+        memberByName(name: $name) {
+          id
+          name
+          email
+          role
+          team { id name }
+        }
+      }
+    variables:
+      name:
+        type: String!
+        source: intent
+        intentParam: member_name
+        description: Member name to search for
+    response:
+      dataPath: memberByName
+      schema:
+        id: ID
+        name: String
+        email: String
+        role: String
+
+  findProjectByName:
+    type: query
+    summary: Find a project by name
+    description: |
+      Search for a project by partial or full name match.
+      Used as a grounding resolver — returns the `id` used in tasksByProject queries.
+    x-agent-guidance:
+      - "find project {project_name}"
+      - "look up {project_name} project"
+      - "get project called {project_name}"
+      - "search for {project_name}"
+    graphql: |
+      query FindProjectByName($name: String!) {
+        projectByName(name: $name) {
+          id
+          name
+          description
+          status
+          team { id name }
+        }
+      }
+    variables:
+      name:
+        type: String!
+        source: intent
+        intentParam: project_name
+        description: Project name to search for
+    response:
+      dataPath: projectByName
+      schema:
+        id: ID
+        name: String
+        description: String
+        status: ProjectStatus
+
+  # ── Grounding-capable operations ───────────────────────────────────────────
+
+  listTasksByTeam:
+    type: query
+    summary: List all tasks for a team
+    description: |
+      Returns every task assigned to members of the given team.
+      Requires teamId — resolved automatically from the team's name
+      via the grounding chain (calls findTeamByName first).
+    x-agent-guidance:
+      - "show tasks for {team_name} team"
+      - "list {team_name}'s tasks"
+      - "what is the {team_name} team working on"
+      - "show all work items for {team_name}"
+      - "what tasks does {team_name} have"
+      - "give me the backlog for {team_name}"
+    x-postcall-grounding:
+      steps:
+        - operationId: findTeamByName
+          description: Resolve team name to team ID
+          variables:
+            name: "{{intent.team_name}}"
+          extract:
+            teamId: "teamByName.id"
+    graphql: |
+      query ListTasksByTeam($teamId: ID!) {
+        tasksByTeam(teamId: $teamId) {
+          id
+          title
+          status
+          priority
+          assignee { name email }
+          project { name }
+        }
+      }
+    variables:
+      teamId:
+        type: ID!
+        source: grounding
+        groundingParam: teamId
+        description: Team ID (resolved via grounding from team name)
+    response:
+      dataPath: tasksByTeam
+
+  listProjectsByTeam:
+    type: query
+    summary: List all projects for a team
+    description: |
+      Returns all projects owned by the given team.
+      teamId is resolved automatically from the team name via grounding.
+    x-agent-guidance:
+      - "show projects for {team_name} team"
+      - "list {team_name}'s projects"
+      - "what projects does {team_name} own"
+      - "show all projects in {team_name}"
+      - "what is {team_name} team building"
+    x-postcall-grounding:
+      steps:
+        - operationId: findTeamByName
+          description: Resolve team name to team ID
+          variables:
+            name: "{{intent.team_name}}"
+          extract:
+            teamId: "teamByName.id"
+    graphql: |
+      query ListProjectsByTeam($teamId: ID!) {
+        projectsByTeam(teamId: $teamId) {
+          id
+          name
+          description
+          status
+          tasks { id title status priority }
+        }
+      }
+    variables:
+      teamId:
+        type: ID!
+        source: grounding
+        groundingParam: teamId
+        description: Team ID (resolved via grounding)
+    response:
+      dataPath: projectsByTeam
+
+  listMembersByTeam:
+    type: query
+    summary: List all members of a team
+    description: |
+      Returns all members belonging to the given team.
+      teamId is resolved from the team name via grounding.
+    x-agent-guidance:
+      - "who is in the {team_name} team"
+      - "list members of {team_name}"
+      - "show {team_name} team members"
+      - "who works in {team_name}"
+      - "get all people in {team_name}"
+    x-postcall-grounding:
+      steps:
+        - operationId: findTeamByName
+          description: Resolve team name to team ID
+          variables:
+            name: "{{intent.team_name}}"
+          extract:
+            teamId: "teamByName.id"
+    graphql: |
+      query ListMembersByTeam($teamId: ID!) {
+        membersByTeam(teamId: $teamId) {
+          id
+          name
+          email
+          role
+        }
+      }
+    variables:
+      teamId:
+        type: ID!
+        source: grounding
+        groundingParam: teamId
+        description: Team ID (resolved via grounding)
+    response:
+      dataPath: membersByTeam
+
+  listTasksByProject:
+    type: query
+    summary: List all tasks in a project
+    description: |
+      Returns all tasks belonging to the named project.
+      projectId is resolved from the project name via grounding.
+    x-agent-guidance:
+      - "show tasks in {project_name}"
+      - "list tasks for {project_name} project"
+      - "what tasks are in {project_name}"
+      - "give me the task list for {project_name}"
+      - "show work items in {project_name}"
+    x-postcall-grounding:
+      steps:
+        - operationId: findProjectByName
+          description: Resolve project name to project ID
+          variables:
+            name: "{{intent.project_name}}"
+          extract:
+            projectId: "projectByName.id"
+    graphql: |
+      query ListTasksByProject($projectId: ID!) {
+        tasksByProject(projectId: $projectId) {
+          id
+          title
+          status
+          priority
+          assignee { name email }
+        }
+      }
+    variables:
+      projectId:
+        type: ID!
+        source: grounding
+        groundingParam: projectId
+        description: Project ID (resolved via grounding)
+    response:
+      dataPath: tasksByProject
+
+  listTasksByMember:
+    type: query
+    summary: List all tasks assigned to a person
+    description: |
+      Returns all tasks assigned to the named team member.
+      memberId is resolved from the member's name via grounding.
+    x-agent-guidance:
+      - "show tasks assigned to {member_name}"
+      - "what is {member_name} working on"
+      - "list {member_name}'s tasks"
+      - "show {member_name}'s workload"
+      - "what tasks does {member_name} have"
+      - "find all work assigned to {member_name}"
+    x-postcall-grounding:
+      steps:
+        - operationId: findMemberByName
+          description: Resolve member name to member ID
+          variables:
+            name: "{{intent.member_name}}"
+          extract:
+            memberId: "memberByName.id"
+    graphql: |
+      query ListTasksByMember($memberId: ID!) {
+        tasksByMember(memberId: $memberId) {
+          id
+          title
+          status
+          priority
+          project { name }
+        }
+      }
+    variables:
+      memberId:
+        type: ID!
+        source: grounding
+        groundingParam: memberId
+        description: Member ID (resolved via grounding)
+    response:
+      dataPath: tasksByMember
+
+  listAllMembers:
+    type: query
+    summary: List all members across all teams
+    description: Returns every member in the Forge workspace.
+    x-agent-guidance:
+      - "list all members"
+      - "show everyone in Forge"
+      - "who are all the team members"
+      - "get all people"
+      - "show all employees"
+    graphql: |
+      query ListAllMembers {
+        members {
+          id
+          name
+          email
+          role
+          team { name }
+        }
+      }
+    variables: {}
+    response:
+      dataPath: members
+
+  listAllProjects:
+    type: query
+    summary: List all projects
+    description: Returns every project in the Forge workspace with status and team ownership.
+    x-agent-guidance:
+      - "list all projects"
+      - "show all projects"
+      - "what projects are there"
+      - "get every project"
+      - "show active projects"
+    graphql: |
+      query ListAllProjects {
+        projects {
+          id
+          name
+          description
+          status
+          team { name }
+        }
+      }
+    variables: {}
+    response:
+      dataPath: projects

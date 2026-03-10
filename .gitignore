@@ -1,0 +1,36 @@
+# Environment variables with credentials
+.env
+.env.local
+
+# Stored API tokens (PostCall token storage)
+.tokens.json
+
+# Generated RAG indexes (should be built locally)
+.rag-index.json
+.rag-index-docs.json
+
+# Node modules
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test output
+test-results/
+coverage/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
