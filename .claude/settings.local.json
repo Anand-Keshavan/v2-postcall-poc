@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(node:*)",
+      "Bash(npm install:*)",
+      "Bash(echo list all teams in Forge\nexit:*)",
+      "Bash(printf show tasks for the Engineering team\\\\nexit\\\\n:*)",
+      "Bash(printf show tasks for the Engineering team\\\\nwhat tasks does Alice Chen have\\\\nexit\\\\n:*)",
+      "Bash(lsof:*)",
+      "Bash(pkill:*)",
+      "Bash(grep:*)",
+      "Bash(curl:*)",
+      "Bash(done)",
+      "WebFetch(domain:docs.github.com)",
+      "WebFetch(domain:developer.atlassian.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:community.developer.atlassian.com)",
+      "Bash(ls:*)"
+    ]
+  }
+}
