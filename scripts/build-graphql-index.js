@@ -92,6 +92,46 @@ function extractOperationDoc(apiName, operationId, opDef, schemaPlusInfo) {
   };
 }
 
+// ── Example entity values for concrete query generation ───────────────────────
+
+const EXAMPLE_VALUES = {
+  team_name:    ['Engineering', 'Platform', 'Backend', 'Frontend', 'DevOps'],
+  member_name:  ['Alice', 'Bob', 'Arash', 'John', 'Sarah'],
+  project_name: ['Apollo', 'Phoenix', 'Migration', 'Website Redesign', 'API v2'],
+  repo_name:    ['postcall-poc', 'my-app', 'api-service', 'frontend'],
+  org_name:     ['postmanlabs', 'mycompany', 'acme-corp'],
+  user_name:    ['Alice', 'torvalds', 'John Doe', 'sarah'],
+  username:     ['torvalds', 'alice', 'johndoe'],
+};
+
+/**
+ * Expand a guidance template like "show tasks for {team_name} team" into
+ * multiple concrete queries by substituting example entity values.
+ * Returns all concrete variants.
+ */
+function expandGuidanceTemplates(guidanceList, entityHints) {
+  const expanded = [];
+  for (const template of guidanceList) {
+    const placeholders = [...template.matchAll(/\{(\w+)\}/g)].map(m => m[1]);
+    if (placeholders.length === 0) {
+      expanded.push(template);
+      continue;
+    }
+    // Use the first placeholder's example values to generate variants
+    const primaryParam = placeholders[0];
+    const examples = EXAMPLE_VALUES[primaryParam] || ['SampleValue'];
+    for (const exampleVal of examples.slice(0, 3)) {
+      let concrete = template;
+      for (const ph of placeholders) {
+        const val = EXAMPLE_VALUES[ph]?.[examples.indexOf(exampleVal) % (EXAMPLE_VALUES[ph]?.length || 1)] || exampleVal;
+        concrete = concrete.replace(`{${ph}}`, val);
+      }
+      expanded.push(concrete);
+    }
+  }
+  return [...new Set(expanded)]; // deduplicate
+}
+
 // ── Query generation (same formula as REST builder) ───────────────────────────
 
 async function generateQueries(doc, apiKey) {
@@ -105,6 +145,17 @@ async function generateQueries(doc, apiKey) {
     ? `\nExample intents from spec author (use as inspiration, not verbatim):\n${guidanceExamples.map(g => `  - ${g}`).join('\n')}`
     : '';
 
+  // Build example values hint from entity hints
+  const entityHints = doc.documentation?.extensions?.grounding
+    ? {} : {};
+  const exampleValuesHint = guidanceExamples.some(g => /\{(\w+)\}/.test(g))
+    ? `\nExample concrete names to use (vary across queries):
+  • team names: Engineering, Platform, Backend, Frontend, DevOps
+  • member/person names: Alice, Bob, Arash, John, Sarah
+  • project names: Apollo, Phoenix, Migration, Website Redesign
+  • repo names: postcall-poc, my-app, api-service`
+    : '';
+
   const prompt = `You are generating search queries for a vector similarity index that maps USER REQUESTS to API operations.
 
 API: ${doc.api}
@@ -113,6 +164,7 @@ Protocol: GraphQL
 Summary: ${doc.summary}
 Description: ${doc.description}
 ${guidanceSection}
+${exampleValuesHint}
 
 Variables/Parameters this operation accepts:
 ${paramSummary || '  (none)'}
@@ -122,9 +174,9 @@ to invoke this operation. Think about every different REASON someone might call 
 
 STRICT RULES:
 1. Write from the USER's perspective ("show me…", "find all…", "what are…", "list…")
-2. Use SEMANTIC placeholder names in {curly_braces} that describe the USER's concept:
-     GOOD: {team_name}, {member_name}, {project_name}, {task_title}
-     BAD:  {teamId}, {memberId}, {variables}   ← internal API names, never use
+2. Use CONCRETE REALISTIC EXAMPLE NAMES (like "Engineering team", "Alice", "Phoenix project").
+   Do NOT use placeholder syntax like {team_name} or {member_name} — these hurt embedding quality.
+   Vary the example names across your 10 queries.
 3. Cover ALL the different intents this operation can serve
 4. Vary the phrasing: casual, formal, question form, imperative form
 5. Do NOT repeat the same intent with slightly different words
@@ -199,9 +251,15 @@ async function buildGraphQLIndex(specFile = DEFAULT_SPEC) {
     process.stdout.write(`      [${i + 1}/${operations.length}] ${op.operationId}...`);
 
     const queries = await generateQueries(op, apiKey);
-    totalQueries += queries.length;
 
-    for (const query of queries) {
+    // Also expand x-agent-guidance templates with concrete example names
+    const entityHints = op.extensions?.agentGuidance || [];
+    const expandedGuidance = expandGuidanceTemplates(entityHints, {});
+    // Merge: concrete guidance expansions + OpenAI-generated (deduplicate)
+    const allQueries = [...new Set([...expandedGuidance, ...queries])];
+    totalQueries += allQueries.length;
+
+    for (const query of allQueries) {
       const embedding = await createEmbedding(query, apiKey);
       if (embedding) {
         newEntries.push({
@@ -218,7 +276,7 @@ async function buildGraphQLIndex(specFile = DEFAULT_SPEC) {
       await new Promise(r => setTimeout(r, 80));
     }
 
-    process.stdout.write(` ${queries.length} queries\n`);
+    process.stdout.write(` ${allQueries.length} queries (${expandedGuidance.length} guidance + ${queries.length} generated)\n`);
   }
 
   console.log(`      ✓ Generated ${totalQueries} queries\n`);

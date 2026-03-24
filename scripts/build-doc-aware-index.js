@@ -111,6 +111,7 @@ function extractOperationDocumentation(api, pathStr, method, operation, spec) {
       agentGuidance: operation['x-agent-guidance'] || [],
       grounding: operation['x-postcall-grounding'] || null,
       authDiscovery: operation['x-postcall-auth-discovery'] || null,
+      entityHints: operation['x-postcall-entity-hints'] || {},
     },
 
     // Security requirements

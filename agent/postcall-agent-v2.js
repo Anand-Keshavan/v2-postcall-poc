@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('yaml');
 const { getToken, storeToken, hasToken } = require('../lib/token-storage');
-const { createClientFromSpec } = require('../lib/api-client-simple');
+const { createClientFromSpec, loadFromEnvVars } = require('../lib/api-client-simple');
 const { executeGroundingChain, findOperation } = require('../lib/grounding-executor');
 const { loadIndex, buildIndex, matchQuery, matchQueryTopN, getOpenAIKey, getIndexStats } = require('../lib/rag-matcher');
 const { rerankCandidates } = require('../lib/candidate-reranker');
@@ -23,6 +23,7 @@ const { enrichResponse } = require('../lib/response-enricher');
 const { retrieveDocumentation, formatForHuman } = require('../lib/doc-retriever');
 const contextStore = require('../lib/context-store');
 const abortSignal = require('../lib/abort-signal');
+const { link } = require('../lib/terminal-link');
 
 // Load OAS++ specs (REST) and Schema++ specs (GraphQL)
 const specs = {};       // REST OAS++ specs keyed by api name
@@ -106,7 +107,7 @@ async function executeQuery(query) {
 
   // 1. Match query to operations using RAG, then re-rank with gpt-5.4
   console.log('[1/5] Analyzing query...');
-  let candidates = await matchQueryTopN(query, 3);
+  let candidates = await matchQueryTopN(query, 5);
 
   if (candidates.length === 0) {
     console.log('❌ Could not understand the query.');
@@ -214,8 +215,11 @@ async function executeQuery(query) {
       continue;
     }
 
-    const tokenData = getToken(api);
-    if (!tokenData) {
+    const envCreds = loadFromEnvVars(authDiscovery);
+    const tokenData = envCreds || getToken(api);
+    if (envCreds) {
+      console.log(`      ✓ Using .env credentials for ${api}`);
+    } else if (!tokenData) {
       console.log(`      ⚠ No credentials found for ${api}`);
       const provisioningUrl = getProvisioningUrl(api);
       const authData = await requestAuthForSpec(api, authDiscovery, provisioningUrl);
@@ -307,7 +311,7 @@ async function executeQuery(query) {
           const { opened } = ar.data;
           if (opened?.length > 0) {
             console.log(`\n🌐 Opened ${opened.length} URL(s) in browser:`);
-            opened.forEach(url => console.log(`   • ${url}`));
+            opened.forEach(url => console.log(`   • ${link(url)}`));
           }
         }
       }
@@ -360,7 +364,7 @@ function displayResults(operationId, data) {
       data.slice(0, 10).forEach((issue, i) => {
         console.log(`${i + 1}. #${issue.number}: ${issue.title}`);
         console.log(`   State: ${issue.state}`);
-        console.log(`   URL: ${issue.html_url}\n`);
+        console.log(`   URL: ${link(issue.html_url)}\n`);
       });
       if (data.length > 10) {
         console.log(`... and ${data.length - 10} more`);
@@ -396,7 +400,7 @@ function displayResults(operationId, data) {
       data.slice(0, 10).forEach((repo, i) => {
         console.log(`${i + 1}. ${repo.full_name}`);
         console.log(`   ${repo.description || 'No description'}`);
-        console.log(`   ${repo.html_url}\n`);
+        console.log(`   ${link(repo.html_url)}\n`);
       });
       if (data.length > 10) {
         console.log(`... and ${data.length - 10} more`);

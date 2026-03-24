@@ -20,6 +20,9 @@ info:
     header_name: X-API-Key
     api_key: forge-api-key-postcall-2024
     documentation_url: http://localhost:9000/docs
+    env_vars:
+      api_key: FORGE_API_KEY
+      server_url: FORGE_SERVER_URL
 
   x-postcall-provisioning-url: http://localhost:9000/docs
 
@@ -230,9 +233,11 @@ operations:
 
   listTasksByTeam:
     type: query
-    summary: List all tasks for a team
+    summary: List all Forge project tasks for a team
     description: |
-      Returns every task assigned to members of the given team.
+      Returns every Forge project management task assigned to members of the given team.
+      This queries the Forge work tracking system (not GitHub issues).
+      Use this when the user asks for tasks, work items, or backlog for a named team.
       Requires teamId — resolved automatically from the team's name
       via the grounding chain (calls findTeamByName first).
     x-agent-guidance:
@@ -242,6 +247,14 @@ operations:
       - "show all work items for {team_name}"
       - "what tasks does {team_name} have"
       - "give me the backlog for {team_name}"
+      - "list all tasks for {team_name}"
+      - "show me tasks for {team_name}"
+      - "tasks assigned to {team_name}"
+      - "get all tasks for {team_name}"
+      - "what work is {team_name} doing"
+      - "show {team_name} task list"
+    x-postcall-entity-hints:
+      team_name: "The name of the team whose tasks to retrieve"
     x-postcall-grounding:
       steps:
         - operationId: findTeamByName
@@ -250,6 +263,8 @@ operations:
             name: "{{intent.team_name}}"
           extract:
             teamId: "teamByName.id"
+          required: true
+          error_message: "Could not find a team named '{{intent.team_name}}'. Check the team name in Forge."
     graphql: |
       query ListTasksByTeam($teamId: ID!) {
         tasksByTeam(teamId: $teamId) {
@@ -282,6 +297,11 @@ operations:
       - "what projects does {team_name} own"
       - "show all projects in {team_name}"
       - "what is {team_name} team building"
+      - "list projects for {team_name}"
+      - "show me projects for {team_name}"
+      - "get all projects for {team_name}"
+    x-postcall-entity-hints:
+      team_name: "The name of the team whose projects to retrieve"
     x-postcall-grounding:
       steps:
         - operationId: findTeamByName
@@ -290,6 +310,8 @@ operations:
             name: "{{intent.team_name}}"
           extract:
             teamId: "teamByName.id"
+          required: true
+          error_message: "Could not find a team named '{{intent.team_name}}'. Check the team name in Forge."
     graphql: |
       query ListProjectsByTeam($teamId: ID!) {
         projectsByTeam(teamId: $teamId) {
@@ -321,6 +343,8 @@ operations:
       - "show {team_name} team members"
       - "who works in {team_name}"
       - "get all people in {team_name}"
+    x-postcall-entity-hints:
+      team_name: "The name of the team to list members of"
     x-postcall-grounding:
       steps:
         - operationId: findTeamByName
@@ -329,6 +353,8 @@ operations:
             name: "{{intent.team_name}}"
           extract:
             teamId: "teamByName.id"
+          required: true
+          error_message: "Could not find a team named '{{intent.team_name}}'. Check the team name in Forge."
     graphql: |
       query ListMembersByTeam($teamId: ID!) {
         membersByTeam(teamId: $teamId) {
@@ -359,6 +385,8 @@ operations:
       - "what tasks are in {project_name}"
       - "give me the task list for {project_name}"
       - "show work items in {project_name}"
+    x-postcall-entity-hints:
+      project_name: "The name of the project whose tasks to retrieve"
     x-postcall-grounding:
       steps:
         - operationId: findProjectByName
@@ -367,6 +395,8 @@ operations:
             name: "{{intent.project_name}}"
           extract:
             projectId: "projectByName.id"
+          required: true
+          error_message: "Could not find a project named '{{intent.project_name}}'. Check the project name in Forge."
     graphql: |
       query ListTasksByProject($projectId: ID!) {
         tasksByProject(projectId: $projectId) {
@@ -388,10 +418,13 @@ operations:
 
   listTasksByMember:
     type: query
-    summary: List all tasks assigned to a person
+    summary: List all Forge project tasks assigned to a team member
     description: |
-      Returns all tasks assigned to the named team member.
+      Returns all Forge project management tasks assigned to the named team member.
+      This looks up tasks in the Forge work tracking system, not GitHub issues.
       memberId is resolved from the member's name via grounding.
+      Use this when the user asks what someone is working on, their task list,
+      or their assigned work items in the project management system.
     x-agent-guidance:
       - "show tasks assigned to {member_name}"
       - "what is {member_name} working on"
@@ -399,6 +432,16 @@ operations:
       - "show {member_name}'s workload"
       - "what tasks does {member_name} have"
       - "find all work assigned to {member_name}"
+      - "tasks for {member_name}"
+      - "get all tasks for {member_name}"
+      - "show me tasks for {member_name}"
+      - "what work does {member_name} have"
+      - "what is {member_name} assigned to in the project"
+      - "show {member_name}'s assigned tasks"
+      - "list work items for {member_name}"
+      - "what Forge tasks does {member_name} have"
+    x-postcall-entity-hints:
+      member_name: "The name of the team member whose tasks to retrieve"
     x-postcall-grounding:
       steps:
         - operationId: findMemberByName
@@ -407,6 +450,8 @@ operations:
             name: "{{intent.member_name}}"
           extract:
             memberId: "memberByName.id"
+          required: true
+          error_message: "Could not find a member named '{{intent.member_name}}'. Check the member's name in Forge."
     graphql: |
       query ListTasksByMember($memberId: ID!) {
         tasksByMember(memberId: $memberId) {

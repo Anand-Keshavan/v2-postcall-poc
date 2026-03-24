@@ -1,0 +1,482 @@
+graphqlSchemaPlus: 1.0.0
+info:
+  title: Rick And Morty GraphQL API (Schema++)
+  version: 1.0.0
+  description: |
+    Rick And Morty GraphQL API annotated with PostCall Schema++ extensions for agent-ready natural language access.
+
+    Extensions included:
+    - x-postcall-auth-discovery: Authentication metadata
+    - x-postcall-grounding: Resolver chains for ID resolution
+    - x-agent-guidance: Natural language query seeds for RAG indexing
+  x-postcall-auth-discovery:
+    type: none
+server:
+  url: https://rickandmortyapi.com/graphql
+  protocol: graphql
+schema: >
+  # Rick and Morty GraphQL API Schema
+
+  # Endpoint: https://rickandmortyapi.com/graphql
+
+  # No authentication required — public API
+
+
+  enum CacheControlScope {
+    PUBLIC
+    PRIVATE
+  }
+
+
+  """
+
+  The `Upload` scalar type represents a file upload.
+
+  """
+
+  scalar Upload
+
+
+  type Info {
+    """The length of the response"""
+    count: Int
+    """The amount of pages"""
+    pages: Int
+    """Number of the next page (if it exists)"""
+    next: Int
+    """Number of the previous page (if it exists)"""
+    prev: Int
+  }
+
+
+  # ── Character ──────────────────────────────────────────────────────────────────
+
+
+  enum CharacterStatus {
+    Alive
+    Dead
+    unknown
+  }
+
+
+  enum CharacterGender {
+    Female
+    Male
+    Genderless
+    unknown
+  }
+
+
+  input FilterCharacter {
+    name: String
+    status: String
+    species: String
+    type: String
+    gender: String
+  }
+
+
+  type Character {
+    """The id of the character."""
+    id: ID
+    """The name of the character."""
+    name: String
+    """The status of the character ('Alive', 'Dead' or 'unknown')."""
+    status: String
+    """The species of the character."""
+    species: String
+    """The type or subspecies of the character."""
+    type: String
+    """The gender of the character ('Female', 'Male', 'Genderless' or 'unknown')."""
+    gender: String
+    """The character's origin location."""
+    origin: Location
+    """The character's last known location."""
+    location: Location
+    """Link to the character's image. All images are 300x300px and most are medium shots or portraits since they are intended to be used as avatars."""
+    image: String
+    """Episodes in which this character appeared."""
+    episode: [Episode]!
+    """Link to the character's own URL endpoint."""
+    url: String
+    """Time at which the character was created in the database."""
+    created: String
+  }
+
+
+  type Characters {
+    info: Info
+    results: [Character]
+  }
+
+
+  # ── Location ───────────────────────────────────────────────────────────────────
+
+
+  input FilterLocation {
+    name: String
+    type: String
+    dimension: String
+  }
+
+
+  type Location {
+    """The id of the location."""
+    id: ID
+    """The name of the location."""
+    name: String
+    """The type of the location."""
+    type: String
+    """The dimension in which the location is located."""
+    dimension: String
+    """List of characters who have been last seen in this location."""
+    residents: [Character]!
+    """Link to the location's own URL endpoint."""
+    url: String
+    """Time at which the location was created in the database."""
+    created: String
+  }
+
+
+  type Locations {
+    info: Info
+    results: [Location]
+  }
+
+
+  # ── Episode ────────────────────────────────────────────────────────────────────
+
+
+  input FilterEpisode {
+    name: String
+    episode: String
+  }
+
+
+  type Episode {
+    """The id of the episode."""
+    id: ID
+    """The name of the episode."""
+    name: String
+    """The air date of the episode."""
+    air_date: String
+    """The code of the episode."""
+    episode: String
+    """List of characters who appeared in this episode."""
+    characters: [Character]!
+    """Link to the episode's own URL endpoint."""
+    url: String
+    """Time at which the episode was created in the database."""
+    created: String
+  }
+
+
+  type Episodes {
+    info: Info
+    results: [Episode]
+  }
+
+
+  # ── Root Query ─────────────────────────────────────────────────────────────────
+
+
+  type Query {
+    """Get a specific character by ID."""
+    character(id: ID!): Character
+
+    """Get the list of all characters. Supports pagination and filtering by name, status, species, type and gender."""
+    characters(page: Int, filter: FilterCharacter): Characters
+
+    """Get a list of characters selected by ids."""
+    charactersByIds(ids: [ID!]!): [Character]
+
+    """Get a specific location by ID."""
+    location(id: ID!): Location
+
+    """Get the list of all locations. Supports pagination and filtering by name, type and dimension."""
+    locations(page: Int, filter: FilterLocation): Locations
+
+    """Get a list of locations selected by ids."""
+    locationsByIds(ids: [ID!]!): [Location]
+
+    """Get a specific episode by ID."""
+    episode(id: ID!): Episode
+
+    """Get the list of all episodes. Supports pagination and filtering by name and episode code."""
+    episodes(page: Int, filter: FilterEpisode): Episodes
+
+    """Get a list of episodes selected by ids."""
+    episodesByIds(ids: [ID!]!): [Episode]
+  }
+operations:
+  character:
+    type: query
+    summary: Retrieve details of a specific character by ID.
+    description: Use this operation to fetch detailed information about a specific character from the Rick and Morty
+      universe by providing their unique ID. Ideal for cases where you need to know about a character's attributes,
+      origin, and location.
+    x-agent-guidance:
+      - Tell me about Rick Sanchez.
+      - Get details for Morty Smith.
+      - Who is Beth Smith in the show?
+      - Find information on Summer Smith.
+      - I want to know about Jerry Smith.
+      - Show me details of Rick Sanchez.
+      - Provide information on Morty Smith.
+      - Can you give me details about Beth Smith?
+    x-postcall-entity-hints:
+      character_name: The name of the character to retrieve details for.
+    x-postcall-grounding:
+      steps:
+        - operationId: characters
+          description: Resolve character_name to id
+          variables:
+            filter:
+              name: "{{intent.character_name}}"
+          extract:
+            id: results[0].id
+          required: true
+          error_message: Could not find a character named '{{intent.character_name}}'.
+    graphql: "query GetCharacter($id: ID!) { character(id: $id) { id name status species type gender origin { id name }
+      location { id name } } }"
+    variables:
+      id:
+        type: ID!
+        source: grounding
+        groundingParam: id
+        description: The unique ID of the character to retrieve.
+    response:
+      dataPath: character
+  characters:
+    type: query
+    summary: Fetch a list of all characters with optional filters.
+    description: This operation retrieves a paginated list of characters from the Rick and Morty universe. You can apply
+      filters such as name, status, species, type, and gender to narrow down the results.
+    x-agent-guidance:
+      - List all characters.
+      - Show characters who are alive.
+      - Find female characters.
+      - Get all human characters.
+      - Show me characters named Rick.
+      - List species like 'Alien'.
+      - Find characters with species 'Human'.
+      - I want to see all male characters.
+    graphql: "query GetCharacters($page: Int, $filter: FilterCharacter) { characters(page: $page, filter: $filter) { info {
+      count pages } results { id name status species type gender } } }"
+    variables:
+      page:
+        type: Int
+        source: literal
+        description: The page number to retrieve in the paginated results.
+      filter:
+        type: FilterCharacter
+        source: intent
+        intentParam: filter
+        description: Criteria to filter characters by attributes like name or status.
+    response:
+      dataPath: characters
+  charactersByIds:
+    type: query
+    summary: Get details of multiple characters by their IDs.
+    description: Use this operation to fetch information about multiple characters by providing a list of their unique IDs.
+      Suitable for retrieving detailed data for a set of characters.
+    x-agent-guidance:
+      - Get details for Rick and Morty.
+      - Show me info on Beth and Jerry Smith.
+      - Provide data on Summer Smith and Rick Sanchez.
+      - I want to know about Morty Smith and Beth Smith.
+      - Find information on characters with specific IDs.
+      - Retrieve details about multiple characters.
+      - Tell me about several characters at once.
+      - Can you give me info on Rick, Morty, and Beth?
+    x-postcall-entity-hints:
+      character_names: Names of the characters to retrieve details for.
+    graphql: "query GetCharactersByIds($ids: [ID!]!) { charactersByIds(ids: $ids) { id name status species type gender
+      origin { id name } location { id name } } }"
+    variables:
+      ids:
+        type: "[ID!]!"
+        source: grounding
+        groundingParam: ids
+        description: A list of unique IDs for the characters to retrieve.
+    response:
+      dataPath: charactersByIds
+  location:
+    type: query
+    summary: Retrieve detailed info about a specific location.
+    description: Use this operation to get detailed information about a specific location in the Rick and Morty universe by
+      providing its name. It is useful for exploring specific settings and understanding their characteristics.
+    x-agent-guidance:
+      - Tell me about the Citadel of Ricks.
+      - Show details for Anatomy Park.
+      - I need information on Earth in the Rick and Morty universe.
+      - Give me the specifics of Interdimensional Cable.
+      - What's the dimension type of the Citadel of Ricks?
+      - Find the resident details of Earth.
+      - Describe Anatomy Park for me.
+      - What kind of place is Interdimensional Cable?
+    x-postcall-entity-hints:
+      location_name: The name of the location to retrieve information about.
+    x-postcall-grounding:
+      steps:
+        - operationId: locations
+          description: Resolve location_name to id
+          variables:
+            filter:
+              name: "{{intent.location_name}}"
+          extract:
+            id: results[0].id
+          required: true
+          error_message: Could not find a location named '{{intent.location_name}}'.
+    graphql: "query GetLocation($id: ID!) { location(id: $id) { id name type dimension residents { id name } url created } }"
+    variables:
+      id:
+        type: ID!
+        source: grounding
+        groundingParam: id
+        description: The unique identifier for the location.
+    response:
+      dataPath: location
+  locations:
+    type: query
+    summary: Get a list of all locations with optional filtering.
+    description: This operation retrieves a paginated list of locations available in the Rick and Morty universe. It
+      supports filtering by name, type, and dimension, allowing for targeted searches. This is useful for exploring and
+      discovering various settings.
+    x-agent-guidance:
+      - List all locations in Rick and Morty.
+      - Show me the locations with dimension 'Dimension C-137'.
+      - Filter locations by type 'Planet'.
+      - What locations exist in the universe?
+      - Find locations by name that include 'Citadel'.
+      - I want a list of planets in Rick and Morty.
+      - Any locations matching the name 'Earth'?
+      - Show locations from the first page.
+    graphql: "query GetLocations($page: Int, $filter: FilterLocation) { locations(page: $page, filter: $filter) { info {
+      count pages } results { id name type dimension residents { id name } } } }"
+    variables:
+      page:
+        type: Int
+        source: literal
+        description: The page number of the results to fetch.
+      filter:
+        type: FilterLocation
+        source: intent
+        intentParam: filter_criteria
+        description: Criteria to filter locations by name, type, or dimension.
+    response:
+      dataPath: locations
+  locationsByIds:
+    type: query
+    summary: Fetch details of multiple locations by their IDs.
+    description: This operation allows retrieval of information for multiple locations by their IDs. It is useful for
+      obtaining detailed data on specific locations quickly when IDs are known.
+    x-agent-guidance:
+      - Get details of locations with IDs 1 and 2.
+      - Fetch information for location IDs 3, 4, and 5.
+      - I need data on multiple locations by ID.
+      - Provide details for locations with given IDs.
+      - Show me the info for location IDs 6 and 7.
+      - What are the specifics of locations with IDs 8 and 9?
+      - Retrieve location data for IDs 10 and 11.
+      - List information for several locations using IDs.
+    graphql: "query GetLocationsByIds($ids: [ID!]!) { locationsByIds(ids: $ids) { id name type dimension residents { id name
+      } url created } }"
+    variables:
+      ids:
+        type: "[ID!]!"
+        source: grounding
+        groundingParam: ids
+        description: A list of unique identifiers for the locations.
+    response:
+      dataPath: locationsByIds
+  episode:
+    type: query
+    summary: Retrieve details of a specific episode by its ID.
+    description: Use this operation to get detailed information about a specific episode from the series, such as its air
+      date and characters. This is useful when you have an episode name and need to find more information about it.
+    x-agent-guidance:
+      - Tell me about the episode 'Pilot'
+      - Give details of 'Ricklantis Mixup'
+      - Information on 'The Rickshank Rickdemption' episode
+      - Fetch data for the 'Close Rick-counters' episode
+      - Look up the episode called 'Pilot'
+      - I want to know more about 'The Rickshank Rickdemption'
+      - Can you show me details of 'Ricklantis Mixup'?
+      - Details for the episode 'Close Rick-counters'
+    x-postcall-entity-hints:
+      episode_name: The name of the episode to retrieve details for
+    x-postcall-grounding:
+      steps:
+        - operationId: episodes
+          description: Resolve episode_name to id
+          variables:
+            filter:
+              name: "{{intent.episode_name}}"
+          extract:
+            id: results[0].id
+          required: true
+          error_message: Could not find an episode named '{{intent.episode_name}}'.
+    graphql: "query GetEpisode($id: ID!) { episode(id: $id) { id name air_date episode characters { id name } url created } }"
+    variables:
+      id:
+        type: ID!
+        source: grounding
+        groundingParam: id
+        description: The unique identifier of the episode
+    response:
+      dataPath: episode
+  episodes:
+    type: query
+    summary: Get a paginated list of all episodes.
+    description: Use this operation to retrieve a list of all episodes from the series, with options for pagination and
+      filtering by name or episode code. This can help you browse through episodes or find specific ones based on
+      certain criteria.
+    x-agent-guidance:
+      - List all episodes of Rick and Morty
+      - Show me episodes with 'Rick' in the title
+      - Find episodes from the first season
+      - Browse through all Rick and Morty episodes
+      - Give me episodes with 'Pilot' in their name
+      - What episodes are there in season 2?
+      - List episodes with code S01E01
+      - Show all available episodes
+    graphql: "query GetEpisodes($page: Int, $filter: FilterEpisode) { episodes(page: $page, filter: $filter) { info { count
+      pages } results { id name air_date episode characters { id name } } } }"
+    variables:
+      page:
+        type: Int
+        source: literal
+        description: The page number for paginated results
+      filter:
+        type: FilterEpisode
+        source: literal
+        description: Criteria to filter episodes by name or episode code
+    response:
+      dataPath: episodes
+  episodesByIds:
+    type: query
+    summary: Retrieve multiple episodes by their IDs.
+    description: Use this operation to get detailed information about multiple episodes by providing their IDs. This is
+      useful when you have specific episode references and need to fetch their details all at once.
+    x-agent-guidance:
+      - Get details for episodes 'Pilot' and 'Ricklantis Mixup'
+      - Fetch information on episodes 'The Rickshank Rickdemption' and 'Close Rick-counters'
+      - Retrieve data for episodes with IDs 1 and 2
+      - List details for episodes 3 and 4
+      - Show episodes with IDs 5 and 6
+      - Give me info on episodes 7 and 8
+      - Details for episodes 9 and 10
+      - Can you bring up episodes 11 and 12?
+    x-postcall-entity-hints:
+      episode_ids: The list of episode IDs to retrieve details for
+    graphql: "query GetEpisodesByIds($ids: [ID!]!) { episodesByIds(ids: $ids) { id name air_date episode characters { id
+      name } url created } }"
+    variables:
+      ids:
+        type: "[ID!]!"
+        source: intent
+        intentParam: episode_ids
+        description: The list of unique identifiers for the episodes
+    response:
+      dataPath: episodesByIds

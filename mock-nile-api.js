@@ -280,6 +280,11 @@ app.get('/users/:user_id', (req, res) => {
 
 // ============= CATEGORY ENDPOINTS =============
 
+// List all categories
+app.get('/categories', (req, res) => {
+  res.json({ categories, total: categories.length });
+});
+
 // Search categories by name
 app.get('/categories/search', (req, res) => {
   const { name } = req.query;

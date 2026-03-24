@@ -28,6 +28,8 @@ info:
       read:user: Read user profile data
       user:email: Access user email addresses
       read:org: Read organization membership and details
+    env_vars:
+      token: GITHUB_TOKEN
 
   x-postcall-provisioning-url: https://github.com/settings/tokens/new?description=PostCall&scopes=repo,read:user,user:email,read:org
   x-postcall-auth-notes: |
@@ -96,6 +98,23 @@ paths:
         - "show profile for {username}"
         - "look up github user {username}"
         - "who is {username} on github"
+        - "find github profile for {name}"
+        - "show {name}'s github account"
+
+      x-postcall-entity-hints:
+        user_name: "The name or GitHub username (can be display name like 'John Doe' or login like 'torvalds')"
+
+      x-postcall-grounding:
+        steps:
+          - operationId: searchUsers
+            description: "Resolve human name or partial username to exact GitHub login"
+            parameters:
+              q: "{{intent.user_name}} in:login,name type:user"
+            extract:
+              username: "items[0].login"
+            required: false
+            error_message: "Could not find a GitHub user matching '{{intent.user_name}}'."
+
       parameters:
         - name: username
           in: path
@@ -186,15 +205,20 @@ paths:
         - "describe the {org_name} github organization"
         - "what is the {org_name} organization"
 
+      x-postcall-entity-hints:
+        org_name: "The name or login of the GitHub organization the user is asking about"
+
       # GROUNDING CHAIN (Pattern A): org name → org login
       x-postcall-grounding:
         steps:
-          - operationId: searchRepos
-            description: "Find the exact org login by searching for repos in the named org"
+          - operationId: searchUsers
+            description: "Resolve org name to exact GitHub org login"
             parameters:
-              q: "org:{{intent.org_name}}"
+              q: "{{intent.org_name}} type:org"
             extract:
-              org: "items[0].owner.login"
+              org: "items[0].login"
+            required: true
+            error_message: "Could not find a GitHub organization matching '{{intent.org_name}}'. Try the exact slug (e.g. 'postmanlabs' not 'Postman Labs')."
 
       parameters:
         - name: org
@@ -243,15 +267,20 @@ paths:
         - "who belongs to {org_name} github organization"
         - "list people in {org_name}"
 
+      x-postcall-entity-hints:
+        org_name: "The name or login of the GitHub organization to list members of"
+
       # GROUNDING CHAIN (Pattern A): org name → org login
       x-postcall-grounding:
         steps:
-          - operationId: searchRepos
-            description: "Find the exact org login by searching for repos in the named org"
+          - operationId: searchUsers
+            description: "Resolve org name to exact GitHub org login"
             parameters:
-              q: "org:{{intent.org_name}}"
+              q: "{{intent.org_name}} type:org"
             extract:
-              org: "items[0].owner.login"
+              org: "items[0].login"
+            required: true
+            error_message: "Could not find a GitHub organization matching '{{intent.org_name}}'. Try the exact slug (e.g. 'postmanlabs' not 'Postman Labs')."
 
       parameters:
         - name: org
@@ -373,15 +402,20 @@ paths:
         - "show {org_name} organization repositories"
         - "list projects in {org_name}"
 
+      x-postcall-entity-hints:
+        org_name: "The name or login of the GitHub organization to list repositories for"
+
       # GROUNDING CHAIN (Pattern A): org name → org login
       x-postcall-grounding:
         steps:
-          - operationId: searchRepos
-            description: "Find the exact org login by searching for repos in the named org"
+          - operationId: searchUsers
+            description: "Resolve org name to exact GitHub org login"
             parameters:
-              q: "org:{{intent.org_name}}"
+              q: "{{intent.org_name}} type:org"
             extract:
-              org: "items[0].owner.login"
+              org: "items[0].login"
+            required: true
+            error_message: "Could not find a GitHub organization matching '{{intent.org_name}}'. Try the exact slug (e.g. 'postmanlabs' not 'Postman Labs')."
 
       parameters:
         - name: org
@@ -457,21 +491,21 @@ paths:
         - "describe the {repo_name} repository"
         - "what is the {repo_name} github project"
 
+      x-postcall-entity-hints:
+        repo_name: "The name of the GitHub repository (can be in any org or owned by any user; supports owner/repo format)"
+
       # GROUNDING CHAIN (Pattern B): repo name → owner + repo
       x-postcall-grounding:
         steps:
-          - operationId: getAuthenticatedUser
-            description: "Get the authenticated user's login"
-            extract:
-              owner: "login"
-
           - operationId: searchRepos
-            description: "Search for the repository by name"
+            description: "Search for the repository by name, excluding forks to reduce noise"
             parameters:
-              q: "{{intent.repo_name}} in:name user:{{steps[0].owner}}"
+              q: "{{intent.repo_name}} in:name fork:false"
             extract:
               owner: "items[0].owner.login"
               repo: "items[0].name"
+            required: true
+            error_message: "Could not find a repository named '{{intent.repo_name}}'. Use the exact name (e.g. 'postcall-poc' not 'postcall poc')."
 
       parameters:
         - name: owner
@@ -592,6 +626,66 @@ paths:
                             login:
                               type: string
 
+  /search/users:
+    get:
+      operationId: searchUsers
+      summary: Search GitHub users and organizations
+      description: |
+        Search GitHub users and organizations by login or display name.
+        Use type:org to restrict to organizations only.
+        Use type:user to restrict to individual user accounts.
+        Use in:login,name to match against both slug and display name.
+        Returns items[].{login, type, name, html_url}.
+      x-agent-guidance:
+        - "find github user {username}"
+        - "look up {name} on github"
+        - "search for github org {org_name}"
+        - "find organization named {org_name}"
+        - "who is {name} on github"
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: |
+            Search query. Qualifiers:
+            - type:org — organizations only
+            - type:user — individual accounts only
+            - in:login,name — match slug OR display name
+          schema:
+            type: string
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 100
+      responses:
+        '200':
+          description: User/org search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        login:
+                          type: string
+                          description: Exact GitHub slug (used in API paths)
+                        type:
+                          type: string
+                          description: "User or Organization"
+                        name:
+                          type: string
+                          description: Display name
+                        html_url:
+                          type: string
+
   # ── Issues ────────────────────────────────────────────────────────────────────
 
   /issues:
@@ -685,15 +779,20 @@ paths:
         - "show all issues across {org_name} repos"
         - "list {org_name} organization issues"
 
+      x-postcall-entity-hints:
+        org_name: "The name or login of the GitHub organization to list issues for"
+
       # GROUNDING CHAIN (Pattern A): org name → org login
       x-postcall-grounding:
         steps:
-          - operationId: searchRepos
-            description: "Find the exact org login by searching for repos in the named org"
+          - operationId: searchUsers
+            description: "Resolve org name to exact GitHub org login"
             parameters:
-              q: "org:{{intent.org_name}}"
+              q: "{{intent.org_name}} type:org"
             extract:
-              org: "items[0].owner.login"
+              org: "items[0].login"
+            required: true
+            error_message: "Could not find a GitHub organization matching '{{intent.org_name}}'. Try the exact slug (e.g. 'postmanlabs' not 'Postman Labs')."
 
       parameters:
         - name: org
@@ -769,21 +868,21 @@ paths:
         - "find open issues in {repo_name} repository"
         - "list all issues for {repo_name}"
 
+      x-postcall-entity-hints:
+        repo_name: "The name of the GitHub repository (can be in any org or owned by any user; supports owner/repo format)"
+
       # GROUNDING CHAIN (Pattern B): repo name → owner + repo
       x-postcall-grounding:
         steps:
-          - operationId: getAuthenticatedUser
-            description: "Get the authenticated user's login"
-            extract:
-              owner: "login"
-
           - operationId: searchRepos
-            description: "Search for the repository by name"
+            description: "Search for the repository by name, excluding forks to reduce noise"
             parameters:
-              q: "{{intent.repo_name}} in:name user:{{steps[0].owner}}"
+              q: "{{intent.repo_name}} in:name fork:false"
             extract:
               owner: "items[0].owner.login"
               repo: "items[0].name"
+            required: true
+            error_message: "Could not find a repository named '{{intent.repo_name}}'. Use the exact name (e.g. 'postcall-poc' not 'postcall poc')."
 
       parameters:
         - name: owner
@@ -867,21 +966,22 @@ paths:
         - "details of issue {issue_number} in {repo_name}"
         - "what is issue {issue_number} about in {repo_name}"
 
+      x-postcall-entity-hints:
+        repo_name: "The name of the GitHub repository (can be in any org or owned by any user; supports owner/repo format)"
+        issue_number: "The numeric issue number to retrieve"
+
       # GROUNDING CHAIN (Pattern B): repo name → owner + repo
       x-postcall-grounding:
         steps:
-          - operationId: getAuthenticatedUser
-            description: "Get the authenticated user's login"
-            extract:
-              owner: "login"
-
           - operationId: searchRepos
-            description: "Search for the repository by name"
+            description: "Search for the repository by name, excluding forks to reduce noise"
             parameters:
-              q: "{{intent.repo_name}} in:name user:{{steps[0].owner}}"
+              q: "{{intent.repo_name}} in:name fork:false"
             extract:
               owner: "items[0].owner.login"
               repo: "items[0].name"
+            required: true
+            error_message: "Could not find a repository named '{{intent.repo_name}}'. Use the exact name (e.g. 'postcall-poc' not 'postcall poc')."
 
       parameters:
         - name: owner
@@ -1055,21 +1155,21 @@ paths:
         - "show merged pull requests in {repo_name}"
         - "find pull requests in {repo_name}"
 
+      x-postcall-entity-hints:
+        repo_name: "The name of the GitHub repository (can be in any org or owned by any user; supports owner/repo format)"
+
       # GROUNDING CHAIN (Pattern B): repo name → owner + repo
       x-postcall-grounding:
         steps:
-          - operationId: getAuthenticatedUser
-            description: "Get the authenticated user's login"
-            extract:
-              owner: "login"
-
           - operationId: searchRepos
-            description: "Search for the repository by name"
+            description: "Search for the repository by name, excluding forks to reduce noise"
             parameters:
-              q: "{{intent.repo_name}} in:name user:{{steps[0].owner}}"
+              q: "{{intent.repo_name}} in:name fork:false"
             extract:
               owner: "items[0].owner.login"
               repo: "items[0].name"
+            required: true
+            error_message: "Could not find a repository named '{{intent.repo_name}}'. Use the exact name (e.g. 'postcall-poc' not 'postcall poc')."
 
       parameters:
         - name: owner
@@ -1152,6 +1252,73 @@ paths:
                     updated_at:
                       type: string
                     merged_at:
+                      type: string
+
+  /repos/{owner}/{repo}/contributors:
+    get:
+      operationId: getRepoContributors
+      summary: List contributors to a repository
+      description: List users who have contributed commits to a repository, sorted by contribution count.
+
+      x-agent-guidance:
+        - "who contributed to {repo_name}"
+        - "list contributors to {repo_name} repository"
+        - "show contributors for {repo_name}"
+        - "who are the top contributors to {repo_name}"
+        - "find contributors of {repo_name}"
+        - "who has committed to {repo_name}"
+
+      x-postcall-entity-hints:
+        repo_name: "The name of the GitHub repository to get contributors for (can be in any org or owned by any user)"
+
+      x-postcall-grounding:
+        steps:
+          - operationId: searchRepos
+            description: "Search for the repository by name, excluding forks to reduce noise"
+            parameters:
+              q: "{{intent.repo_name}} in:name fork:false"
+            extract:
+              owner: "items[0].owner.login"
+              repo: "items[0].name"
+            required: true
+            error_message: "Could not find a repository named '{{intent.repo_name}}'."
+
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          description: Repository owner (resolved via grounding)
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          description: Repository name (resolved via grounding)
+          schema:
+            type: string
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+      responses:
+        '200':
+          description: List of contributors sorted by contribution count
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    login:
+                      type: string
+                    contributions:
+                      type: integer
+                    html_url:
+                      type: string
+                    avatar_url:
                       type: string
 
 components:

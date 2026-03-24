@@ -14,6 +14,11 @@ info:
     client_secret: postcall-secret
     scopes:
       read: Read access to all Nile resources
+    env_vars:
+      client_id: NILE_CLIENT_ID
+      client_secret: NILE_CLIENT_SECRET
+      authorization_url: NILE_AUTH_URL
+      token_url: NILE_TOKEN_URL
 
 servers:
   - url: http://localhost:8000
@@ -74,6 +79,34 @@ paths:
                 $ref: '#/components/schemas/User'
 
   # ==================== CATEGORY ENDPOINTS ====================
+
+  /categories:
+    get:
+      operationId: listCategories
+      summary: List all product categories
+      description: Returns all product categories available in the Nile store. Use this when the user wants to see all categories without filtering by name.
+      x-agent-guidance:
+        - "list all categories"
+        - "show all product categories"
+        - "what categories are there"
+        - "get all categories"
+        - "show me the product categories"
+        - "what types of products do you sell"
+      parameters: []
+      responses:
+        '200':
+          description: All product categories
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Category'
+                  total:
+                    type: integer
 
   /categories/search:
     get:
@@ -186,6 +219,8 @@ paths:
         - "show products in {category_name}"
         - "list products in {category_name} category"
         - "what products are in {category_name}"
+      x-postcall-entity-hints:
+        category_name: "The name of the product category the user wants to browse"
       x-postcall-grounding:
         steps:
           - operationId: searchCategories
@@ -194,6 +229,8 @@ paths:
               name: "{{intent.category_name}}"
             extract:
               category_id: "categories[0].id"
+            required: true
+            error_message: "Could not find a category matching '{{intent.category_name}}'. Check the category name."
       parameters:
         - name: category_id
           in: query
@@ -228,6 +265,8 @@ paths:
         - "list orders for {user_name}"
         - "what orders does {user_name} have"
         - "{user_name}'s orders"
+      x-postcall-entity-hints:
+        user_name: "The name of the customer or user whose orders to retrieve"
       x-postcall-grounding:
         steps:
           - operationId: searchUsers
@@ -236,6 +275,8 @@ paths:
               name: "{{intent.user_name}}"
             extract:
               user_id: "users[0].id"
+            required: true
+            error_message: "Could not find a user matching '{{intent.user_name}}'. Check the user's name."
       parameters:
         - name: user_id
           in: query
@@ -289,6 +330,8 @@ paths:
         - "list reviews for {product_name}"
         - "what do people say about {product_name}"
         - "{product_name} reviews"
+      x-postcall-entity-hints:
+        product_name: "The name of the product to show reviews for"
       x-postcall-grounding:
         steps:
           - operationId: searchProducts
@@ -297,6 +340,8 @@ paths:
               name: "{{intent.product_name}}"
             extract:
               product_id: "products[0].id"
+            required: true
+            error_message: "Could not find a product matching '{{intent.product_name}}'. Check the product name."
       parameters:
         - name: product_id
           in: query

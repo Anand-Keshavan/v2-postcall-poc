@@ -20,6 +20,11 @@ info:
       email: User's Atlassian account email
       api_token: API token generated from Atlassian account
     cloud_id_discovery: https://api.atlassian.com/oauth/token/accessible-resources
+    env_vars:
+      email: CONFLUENCE_EMAIL
+      api_token: CONFLUENCE_API_TOKEN
+      domain: CONFLUENCE_DOMAIN
+      cloud_id: CONFLUENCE_CLOUD_ID
 
   x-postcall-provisioning-url: https://id.atlassian.com/manage-profile/security/api-tokens
 
@@ -91,34 +96,40 @@ paths:
         Returns content that matches a Confluence Query Language (CQL) query.
 
         CQL examples:
-          - Find by creator:     creator.displayName = "Anand"
-          - Find by creator:     creator.displayName = "Abhijit Kane"
+          - Find by creator:     creator.fullname = "Anand Keshavan"
           - Find by creator:     creator = currentUser()
           - Find by type:        type = page AND space.key = "ENG"
           - Find by title:       type = page AND title ~ "Onboarding"
           - Find recent:         type = page AND lastModified > "2024-01-01"
-          - Find in space:       type = page AND space.title = "Engineering"
           - Find by label:       type = page AND label = "release-notes"
-          - Combine:             creator.displayName = "Anand" AND type = page
+          - Combine:             creator.fullname = "Anand" AND type = page
+
+        IMPORTANT — searching by creator/author:
+          Do NOT use this operation to find pages by a person's name.
+          Use the searchPagesByCreator operation instead — it automatically looks up
+          the person's Confluence accountId and filters correctly.
+          creator.displayName and creator.fullname are unreliable on Confluence Cloud
+          and will cause 400 errors or return empty results.
 
         CQL field reference:
-          creator.displayName   – ONLY valid field for searching by author name.
-                                  NEVER use creator.fullname, creator.name, or
-                                  creator.username — these do not exist in CQL
-                                  and will cause a 400 Bad Request error.
-          creator               – author's account ID or currentUser()
-          space.title           – full space name
-          space.key             – space key abbreviation
+          space.key             – space key abbreviation (e.g. "ENG", "PM").
+                                  Use this for space-scoped searches. If you only
+                                  know the space NAME (not the key), use the
+                                  listPagesInSpace operation instead — it resolves
+                                  the name to a key automatically.
+          space.title           – WARNING: unreliable in Confluence REST API v1.
+                                  Causes 400 errors on many instances. Do NOT use
+                                  space.title in CQL — use space.key instead.
           title                 – page title (use ~ for contains, = for exact)
           type                  – page | blogpost | comment | attachment
           lastModified          – date of last update
           label                 – content label/tag
       x-agent-guidance:
-        - "find all pages created by {creator_name}"
         - "search for page named {page_name}"
-        - "list pages in {space_name} space"
         - "find recently updated pages"
-        - "show all blog posts in {space_name}"
+        - "search confluence for {search_term}"
+        - "find pages with label {label}"
+        - "find pages modified after {date}"
       parameters:
         - name: cql
           in: query
@@ -126,11 +137,13 @@ paths:
           description: |
             CQL (Confluence Query Language) query string.
             Always construct a valid CQL expression.
-            To search by author name: creator.displayName = "Full Name"
-              — NEVER use creator.fullname, creator.name, or creator.username.
-                Only creator.displayName is valid. Using any other field causes a 400 error.
-            To search in a space: space.title = "Space Name"
+
+            DO NOT use this for creator/author searches — use searchPagesByCreator instead.
+
             To filter to pages: type = page
+            To search in a space by key: space.key = "ENG" AND type = page
+            WARNING: NEVER use space.title in CQL — it causes 400 errors.
+            If you need to search by space NAME (not key), use the listPagesInSpace operation.
           schema:
             type: string
           example: "creator.displayName = \"Anand\" AND type = page"
@@ -168,17 +181,281 @@ paths:
                   size:
                     type: integer
 
+  # Look up a Confluence user by name — resolver used by searchPagesByCreator grounding
+  # Correct endpoint: /wiki/rest/api/search/user (NOT /wiki/rest/api/user/search)
+  # Uses CQL user.fullname~"name" syntax; response wraps user under results[].user
+  /wiki/rest/api/search/user:
+    get:
+      operationId: searchConfluenceUser
+      summary: Search for a Confluence user by name
+      description: |
+        Returns Confluence users matching a display-name CQL query.
+        Used as a grounding resolver to obtain a user's accountId.
+
+        Endpoint: GET /wiki/rest/api/search/user
+        Parameter: cql using user.fullname~"name" syntax
+
+        The accountId from results[0].user.accountId is used in searchPagesByCreator.
+
+        Do NOT use this operation directly for end-user queries — it is a grounding resolver
+        called automatically before searchPagesByCreator.
+      parameters:
+        - name: cql
+          in: query
+          required: true
+          description: |
+            CQL user search query. Use user.fullname~"name" to search by display name.
+            Example: user.fullname~"Arash Nourian"
+            The ~ operator matches names containing the given string.
+          schema:
+            type: string
+          example: "user.fullname~\"Arash Nourian\""
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Search results containing matching users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        user:
+                          type: object
+                          properties:
+                            accountId:
+                              type: string
+                            displayName:
+                              type: string
+                            accountType:
+                              type: string
+                  size:
+                    type: integer
+                  totalSize:
+                    type: integer
+
+  # Search pages by creator — CQL creator="accountId" via general search endpoint
+  # Per Confluence docs: use creator = "accountId" with = operator (reliable on Cloud).
+  # Grounding resolves creator name → accountId, injected into CQL via {{accountId}} placeholder.
+  # Uses /wiki/rest/api/search (distinct path from searchContent at /wiki/rest/api/content/search).
+  /wiki/rest/api/search:
+    get:
+      operationId: searchPagesByCreator
+      summary: Find pages created by a specific person
+      description: |
+        Returns Confluence pages authored by the named person using CQL.
+
+        The person's name is resolved to their Confluence accountId automatically via
+        the grounding chain. The accountId is injected into the cql parameter using the
+        {{accountId}} placeholder, which is filled at runtime after grounding resolves it.
+
+        CQL for creator only:    type=page AND creator="{{accountId}}"
+        CQL with title keyword:  type=page AND creator="{{accountId}}" AND title ~ "keyword"
+
+        Use this operation whenever the user asks to find pages by a specific author.
+        Always use creator="{{accountId}}" with the = operator — do NOT use
+        creator.displayName or creator.fullname, those are unreliable on Confluence Cloud.
+      x-agent-guidance:
+        - "my colleague Alice Johnson writes a lot of Confluence pages, show them all to me"
+        - "list every Confluence page that Bob Chen has ever written"
+        - "I want to read everything Sarah Williams has published in Confluence"
+        - "pull up all the documentation pages that David Lee created"
+        - "show me Michael Brown's Confluence contributions"
+        - "what has Alice written in Confluence so far"
+        - "I need to find a specific Confluence page that John Smith created — the title includes the word Onboarding"
+        - "show me the page Alice Johnson wrote about the product launch roadmap"
+        - "look up Bob Chen's Confluence page that has PostCall somewhere in the title"
+        - "find the Architecture Overview page that Sarah Williams created"
+        - "show me any page Michael Brown wrote that mentions Integration in the title"
+        - "can you find the page David Lee created that has the word Engineering in the title"
+        - "I remember Alice wrote a Confluence page about the API design — can you find it"
+        - "show me John Smith's page about onboarding new employees"
+
+      x-postcall-entity-hints:
+        creator_name: "The full or partial name of the person who created the pages"
+        title_keyword: "A word or phrase that should appear in the page title (optional)"
+
+      # GROUNDING CHAIN: Resolve creator name → accountId, injected into CQL via {{accountId}}
+      x-postcall-grounding:
+        steps:
+          - operationId: searchConfluenceUser
+            description: "Look up Confluence user by name to get their accountId"
+            parameters:
+              cql: "user.fullname~\"{{intent.creator_name}}\""
+              limit: 5
+            extract:
+              accountId: "results[0].user.accountId"
+            required: true
+            error_message: "Could not find a Confluence user matching '{{intent.creator_name}}'. Check the name spelling."
+
+      parameters:
+        - name: cql
+          in: query
+          required: true
+          description: |
+            CQL query to find pages by creator. The {{accountId}} placeholder is
+            automatically replaced with the resolved accountId from the grounding chain.
+
+            For creator only (no title filter):
+              type=page AND creator="{{accountId}}"
+
+            For creator + title keyword (when user mentions a word in the title):
+              type=page AND creator="{{accountId}}" AND title ~ "keyword"
+
+            Replace "keyword" with the actual word from the user query.
+            Always use the = operator with {{accountId}} — never use creator.displayName.
+          schema:
+            type: string
+          example: 'type=page AND creator="{{accountId}}"'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+      responses:
+        '200':
+          description: Search results containing pages by the specified creator
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        content:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            title:
+                              type: string
+                            _links:
+                              type: object
+                              properties:
+                                webui:
+                                  type: string
+                  _links:
+                    type: object
+                    properties:
+                      next:
+                        type: string
+                      base:
+                        type: string
+
+  # List pages in a specific space (space name → space key → pages)
+  /wiki/rest/api/space/{spaceKey}/content/page:
+    get:
+      operationId: listPagesInSpace
+      summary: List all pages in a Confluence space
+      description: |
+        Returns all pages in the named Confluence space.
+        The space name is resolved to a space key automatically via the grounding chain.
+
+        Use this operation when the user asks to see or list pages in a specific space.
+        Do NOT use searchContent with space.title for this — space.title is unreliable
+        in Confluence REST API v1 and will cause 400 errors.
+      x-agent-guidance:
+        - "show all pages in {space_name} space"
+        - "list pages in {space_name}"
+        - "what pages are in {space_name}"
+        - "show me pages from {space_name}"
+        - "find all pages in the {space_name} space"
+        - "browse pages in {space_name}"
+
+      x-postcall-entity-hints:
+        space_name: "The name of the Confluence space to list pages from"
+
+      # GROUNDING CHAIN: Resolve space name to space key
+      x-postcall-grounding:
+        steps:
+          - operationId: listSpaces
+            description: "Find space by name and resolve to space key"
+            parameters:
+              limit: 100
+            filter: "name contains '{{intent.space_name}}'"
+            extract:
+              spaceKey: "results[0].key"
+            required: true
+            error_message: "Could not find a Confluence space matching '{{intent.space_name}}'. Check the space name."
+
+      parameters:
+        - name: spaceKey
+          in: path
+          required: true
+          description: Space key (resolved via grounding from space name)
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+            maximum: 250
+        - name: start
+          in: query
+          description: Starting index for pagination
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of pages in the space
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        title:
+                          type: string
+                        type:
+                          type: string
+                        _links:
+                          type: object
+                          properties:
+                            webui:
+                              type: string
+                  size:
+                    type: integer
+                  start:
+                    type: integer
+                  limit:
+                    type: integer
+
   # Get page by ID
   /wiki/rest/api/content/{id}:
     get:
       operationId: getPageById
       summary: Get content by ID
-      description: Returns a specific piece of content by ID
+      description: Returns a specific piece of content by ID, including full page body when expand=body.storage is set.
       x-agent-guidance:
         - "get page {page_name}"
         - "show page {page_name}"
         - "open {page_name} page"
         - "show me the {page_name} page in {space_name}"
+        - "what does the {page_name} page say"
+        - "read the {page_name} page"
+
+      x-postcall-entity-hints:
+        page_name: "The title or name of the Confluence page the user wants to read"
+        space_name: "The Confluence space name, if the user mentioned a specific space"
 
       # GROUNDING CHAIN: Resolve page title (and optional space name) to page ID
       x-postcall-grounding:
@@ -190,6 +467,8 @@ paths:
               limit: 1
             extract:
               id: "results[0].id"
+            required: false
+            error_message: "Could not find a page matching '{{intent.page_name}}'. Check the page title."
 
       parameters:
         - name: id
@@ -199,10 +478,14 @@ paths:
             type: string
         - name: expand
           in: query
-          description: Expand properties
+          description: |
+            Comma-separated list of properties to expand.
+            Use "body.storage,version,space" to get the full page content and metadata.
+            Always set this — without it the page body is not returned.
           schema:
             type: string
-          example: "body.storage,version"
+            default: "body.storage,version,space"
+          example: "body.storage,version,space"
       responses:
         '200':
           description: Content details
@@ -235,6 +518,10 @@ paths:
         - "add a new page {title} to {space_name} space"
         - "make a page named {title} in {space_name}"
 
+      x-postcall-entity-hints:
+        space_name: "The name of the Confluence space where the page should be created"
+        title: "The title for the new page"
+
       # GROUNDING CHAIN: Resolve space name to space key
       x-postcall-grounding:
         steps:
@@ -245,6 +532,8 @@ paths:
             filter: "name contains '{{intent.space_name}}'"
             extract:
               spaceKey: "results[0].key"
+            required: true
+            error_message: "Could not find a Confluence space matching '{{intent.space_name}}'. Check the space name."
 
       requestBody:
         required: true
@@ -326,6 +615,11 @@ paths:
         - "leave feedback on {page_name} page"
         - "add '{comment_text}' comment to {page_name}"
 
+      x-postcall-entity-hints:
+        space_name: "The name of the Confluence space containing the page"
+        page_name: "The title of the page to comment on"
+        comment_text: "The text content of the comment to add"
+
       # GROUNDING CHAIN: Resolve space name + page name to page ID
       x-postcall-grounding:
         steps:
@@ -336,6 +630,8 @@ paths:
             filter: "name contains '{{intent.space_name}}'"
             extract:
               spaceKey: "results[0].key"
+            required: true
+            error_message: "Could not find a Confluence space matching '{{intent.space_name}}'. Check the space name."
 
           - operationId: searchContent
             description: "Find page by title in the space"
@@ -344,6 +640,8 @@ paths:
               limit: 10
             extract:
               id: "results[0].id"
+            required: true
+            error_message: "Could not find page '{{intent.page_name}}' in space '{{intent.space_name}}'. Check the page title."
 
       parameters:
         - name: id
